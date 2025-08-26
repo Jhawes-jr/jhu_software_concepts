@@ -1,0 +1,13 @@
+# Ignore virtual environments
+venv/
+rp_flask_board/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code settings
+.vscode/
+
+# Other
+*.log
