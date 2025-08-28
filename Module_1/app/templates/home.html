@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="bio">
+    <h1>Joe Hawes</h1>
+    <h2>Graduate Student - Johns Hopkins University</h2>
+    <p>
+      My name is Joe Hawes.<br><br> I live in Dallas TX with my wife Shizuka and our dog Max.<br><br>
+      I have a BS in Infomation Science and an MS in Data Analytics from the University of North Texas.<br><br>
+      I enjoy traveling, watching sports, playing video games and following AI research and development.<br><br>
+      Feel free to check out my projects or github at the links in the top right. Thanks!
+    </p>
+  </div>
+  <div class="photo">
+    <img src="{{ url_for('static', filename='img/profile.jpg') }}" alt="Profile photo">
+  </div>
+</section>
+{% endblock %}

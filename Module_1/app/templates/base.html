@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}My Site{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav">
+      <ul>
+        <li><a href="{{ url_for('main.home') }}"
+               class="nav-link {% if active_tab=='home' %}active{% endif %}">Home</a></li>
+        <li><a href="{{ url_for('main.projects') }}"
+               class="nav-link {% if active_tab=='projects' %}active{% endif %}">Projects</a></li>
+        <li><a href="{{ url_for('main.contact') }}"
+               class="nav-link {% if active_tab=='contact' %}active{% endif %}">Contact</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <small>&copy; 2025 Joe Hawes</small>
+  </footer>
+</body>
+</html>

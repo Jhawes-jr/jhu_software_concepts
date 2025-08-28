@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<h1>Projects</h1>
+<article class="project">
+  <h2>{{ module_1.title }}</h2>
+  <p>{{ module_1.details }}</p>
+  <p><a class="btn" href="{{ module_1.github_url }}" target="_blank" rel="noopener">View Module 1 on GitHub</a></p>
+</article>
+{% endblock %}
