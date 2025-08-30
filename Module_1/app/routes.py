@@ -13,6 +13,8 @@ def contact():
 @bp.route("/projects")
 def projects():
     module_1 = {
-        "github_url": "https://github.com/Jhawes-jr/jhu_software_concepts.git"
+        "title": "Module 1 - Personal Website Using Flask",
+        #link to repo
+        "github_url": "https://github.com/Jhawes-jr/jhu_software_concepts/tree/main/Module_1"
     }
     return render_template("projects.html", module_1=module_1,  active_tab="projects")
