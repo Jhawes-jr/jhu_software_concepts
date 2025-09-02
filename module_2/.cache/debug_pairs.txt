@@ -1,0 +1,9 @@
+DT: acceptance rate | DD: 33%
+DT: institution | DD: 42 US
+DT: program | DD: Computer Science
+DT: degree type | DD: Masters
+DT: degree's country of origin | DD: International
+DT: decision | DD: Rejected
+DT: notification | DD: on 02/09/2025 via E-mail
+DT: undergrad gpa | DD: 3.22
+DT: notes | DD: 

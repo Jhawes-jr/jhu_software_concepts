@@ -1,133 +1,190 @@
-import urllib3         # for making HTTP requests
-from bs4 import BeautifulSoup       # for parsing HTML
-import os                           # for file system stuff, make folders/files, etc.
-import json                         # for reading/writing JSON
-import time                         # for sleeping between requests
-import urllib.parse as up           # for URL encoding
+# scrape.py
 
-LIST_URL = "https://www.thegradcafe.com/survey/index.php"    # URL of the page to scrape
-CACHE_DIR = ".cache"                                         # temporary holding place for files
-RAW_STREAM = os.path.join(CACHE_DIR, "raw_entries.jsonl")    # raw data file
+import urllib3
+from bs4 import BeautifulSoup
+import os
+import json
+import time
+import re
+import urllib.parse as up
+
+LIST_URL = "https://www.thegradcafe.com/survey/index.php"
+CACHE_DIR = ".cache"
+RAW_STREAM = os.path.join(CACHE_DIR, "raw_entries.jsonl")
+
+# Optional: set True to dump debug HTML files for the first record
+DEBUG = False
+
+# Pull the "Added on Month DD, YYYY" from the list card text
+ADDED_ON_RE = re.compile(r"\bAdded on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})", re.I)
+
+# Map labels seen on detail pages to normalized keys
+LABEL_MAP = {
+    # institution/program
+    "institution": "university",
+    "institution name": "university",
+    "school": "university",
+    "program": "program_name",
+    "program name": "program_name",
+
+    # degree / term
+    "degree type": "degree_type",
+    "term": "term_raw",
+    "term of admission": "term_raw",
+
+    # decision / dates
+    "decision": "status_raw",
+    "notification": "decision_date_raw",
+    "notification date": "decision_date_raw",
+    "decision date": "decision_date_raw",
+
+    # applicant type / origin
+    "degree's country of origin": "citizenship_raw",
+    "degree’s country of origin": "citizenship_raw",
+    "applicant type": "citizenship_raw",
+    "citizenship": "citizenship_raw",
+
+    # academics
+    "undergrad gpa": "gpa_raw",
+    "undergraduate gpa": "gpa_raw",
+
+    # gre variants
+    "gre": "gre_total_raw",
+    "gre general": "gre_total_raw",
+    "gre total": "gre_total_raw",
+    "gre verbal": "gre_v_raw",
+    "gre v": "gre_v_raw",
+    "verbal": "gre_v_raw",
+    "analytical writing": "gre_aw_raw",
+    "gre aw": "gre_aw_raw",
+    "aw": "gre_aw_raw",
+
+    # notes / comments
+    "notes": "comments",
+
+    # sometimes present on detail
+    "added on": "added_on_raw",
+}
 
 HEADERS = {
-    "User-Agent": "JHU-EP-Module2-Scraper/0.1 (+student project)",
+    "User-Agent": "GradScraper/0.1",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-def _http():
-    return urllib3.PoolManager(
-        timeout=urllib3.Timeout(connect=10.0, read=20.0),                                               # set timeouts
-        retries=urllib3.Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504]), # retry on certain HTTP status codes
-        headers=HEADERS)                                                                                # default headers for all requests
+def _norm_label(txt: str) -> str:
+    t = (txt or "")
+    t = t.replace("’", "'")  # normalize curly apostrophes
+    t = " ".join(t.split()).strip().lower()
+    return t[:-1].strip() if t.endswith(":") else t
 
-def _clean_text(s: str | None) -> str | None:
-    """Cleans up text by stripping whitespace and normalizing spaces."""   
-    if not s:
-        return None
-    s = " ".join(s.split())
-    return s or None
+def _dd_for_dt(dt):
+    # On these pages, <dt> and <dd> are siblings inside the same <dl>
+    return dt.find_next_sibling("dd")
 
-def scrape_data(max_entries: int = 100):
-    """Fetch the first results page, parse real entries, and append to .cache/raw_entries.jsonl"""
+def scrape_data(max_entries: int = 20):
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
-    os.makedirs(CACHE_DIR, exist_ok=True)                   # ensure cache directory exists
-    http = _http()                                          # get HTTP manager
-
-    # fetch first page
-    r = http.request("GET", LIST_URL)
-    if r.status != 200:
-        print(f"Error: got HTTP {r.status}")
-        return
-    
-    # decode and parse HTML
-    soup = BeautifulSoup(r.data.decode("utf-8", errors="replace"), "html.parser")  
-
-    #print the title of the page
-    print("page title:", soup.title.get_text() if soup.title else "No title found")
-
-    #count "See More" links on the page
-    links = soup.find_all("a", string=lambda s: s and "See More" in s)
-    print(f"Found {len(links)} 'See More' links on the page.")
+    http = urllib3.PoolManager(
+        headers=HEADERS,
+        timeout=urllib3.Timeout(connect=5.0, read=10.0),
+        retries=urllib3.Retry(total=2, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]),
+    )
 
     written = 0
-    with open(RAW_STREAM, "a", encoding="utf-8") as out: # open for appending new info without overwriting old
-        for a in links:
-            # detail url
-            detail_url = up.urljoin(LIST_URL, a.get("href")) # convert relative to absolute URL
+    page = 1
 
-            # "walk" up a few parents up to find "card" container
-            card = a
-            for _ in range(4):           # go up to 4 levels
-                if card.parent:          # if there's a parent
-                    card = card.parent   # move up
-            block = card.get_text("\n", strip=True) if card else a.get_text("\n", strip=True) # get text block
-            lines = [ln for ln in block.split("\n") if ln]                                    # split into non-empty lines
-            
-            university = _clean_text(lines[0]) if lines else None # first line in the card is usually university name
-
-            program_name = None
-            for ln in lines[1:4]:  # check next few lines for something that looks like a program name
-                if any(k in ln for k in ("Masters", "PhD", "MBA", "MFA", "PsyD", "JD", "MD", "EdD")):
-                    program_name = ln
-                    break
-            if not program_name and len(lines) > 1: # fallback to second line if no program name found
-                program_name = lines[1]
-            
-            # Look for added on (usually contains month, day, 20XX, so we'll use ", 20" to capture anything that fits that pattern) 
-            added_on = next((ln for ln in lines if ", 20" in ln), None)
-
-            # Look for status line (Accepted on, Rejected on, Wait listed on, Interview on)
-            status_line = next((ln for ln in lines if any(
-                k in ln for k in ("Accepted on", "Rejected on", "Wait listed on", "Interview on"))), None)
-            
-            # Look for term (Fall, Spring, Summer, Winter)
-            term = next((ln for ln in lines if any(t in ln for t in("Fall", "Spring", "Summer", "Winter"))), None)
-
-            # Look for citizenship (International, American)
-            citizenship = next((ln for ln in lines if "international" in ln or "American" in ln), None)
-
-            # Look for GPA and GRE
-            gpa_line = next((ln for ln in lines if "GPA" in ln), None)
-            gre_line = next((ln for ln in lines if "GRE" in ln), None)
-
-            # fetch detail page to get comments (if any)
-            comments = None
-            try:
-                rd = http.request("GET", detail_url)  # fetch detail page
-                if rd.status == 200:
-                    dsoup = BeautifulSoup(rd.data.decode("utf-8", errors="replace"), "html.parser")
-                    for el in dsoup.find_all(["p", "div"]):                  # look for paragraphs or divs
-                        t = _clean_text(el.get_text(" ", strip=True))        # get cleaned text
-                        # look for something that looks like a comment (longer than 6 words, not a status line)
-                        if t and len(t.split()) > 6 and not any(t.startswith(x) for x in ("Accepted on", "Rejected on", "Wait listed on", "Interview on")):
-                            comments = t
-                            break
-            except Exception:
-                pass
-
-            # build/define the record dictionary
-            record = {
-                "university": _clean_text(university),
-                "program_name": _clean_text(program_name),
-                "added_on": _clean_text(added_on),
-                "status_raw": _clean_text(status_line),
-                "term_raw": _clean_text(term),
-                "citizenship_raw": _clean_text(citizenship),
-                "gpa_raw": _clean_text(gpa_line),
-                "gre_raw": _clean_text(gre_line),
-                "page": 1,  # since we're only fetching the first page
-            }
-
-            out.write(json.dumps(record, ensure_ascii=False) + "\n") # write as JSON line
-            written += 1
-            if written >= max_entries: # if we hit max entries, stop
+    with open(RAW_STREAM, "w", encoding="utf-8") as out:
+        while written < max_entries:
+            url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
+            r = http.request("GET", url)
+            if r.status != 200:
                 break
-                                            
 
-    
+            soup = BeautifulSoup(r.data.decode("utf-8", errors="replace"), "html.parser")
+            if page == 1:
+                print("Page title:", soup.title.get_text(strip=True) if soup.title else "(no title)")
+            links = soup.find_all("a", string=lambda s: s and "See More" in s)
+            if not links:
+                break
 
-    print(f"Wrote {written} records to {RAW_STREAM}")
-    print("First page scrape complete.")
+            for idx, a in enumerate(links):
+                if written >= max_entries:
+                    break
+
+                detail_url = up.urljoin(LIST_URL, a.get("href"))
+
+                # Added-on from list card (fallback)
+                card = a.find_parent(["article", "li", "div", "section"]) or a.parent
+                card_text = card.get_text(" ", strip=True) if card else ""
+                m = ADDED_ON_RE.search(card_text)
+                added_on_from_list = m.group(1) if m else None
+
+                # Fetch detail page
+                rd = http.request("GET", detail_url)
+                if rd.status != 200:
+                    time.sleep(0.2)
+                    continue
+
+                html = rd.data.decode("utf-8", errors="replace")
+                dsoup = BeautifulSoup(html, "html.parser")
+
+                # Optional debug dumps for the first record only
+                if DEBUG and written == 0:
+                    with open(os.path.join(CACHE_DIR, "debug_detail_page.html"), "w", encoding="utf-8") as f:
+                        f.write(dsoup.prettify())
+                    if card:
+                        with open(os.path.join(CACHE_DIR, "debug_card.html"), "w", encoding="utf-8") as f:
+                            f.write(card.prettify())
+                    dls = dsoup.find_all("dl")
+                    for j, dl_block in enumerate(dls):
+                        with open(os.path.join(CACHE_DIR, f"debug_dl_{j}.html"), "w", encoding="utf-8") as f:
+                            f.write(dl_block.prettify())
+                    with open(os.path.join(CACHE_DIR, "debug_pairs.txt"), "w", encoding="utf-8") as f:
+                        for dl_block in dsoup.find_all("dl"):
+                            for dt in dl_block.find_all("dt"):
+                                dd = _dd_for_dt(dt)
+                                f.write(
+                                    f"DT: {_norm_label(dt.get_text(' ', strip=True))} | "
+                                    f"DD: {(dd.get_text(' ', strip=True) if dd else None)}\n"
+                                )
+
+                # Parse all <dl> blocks on the page
+                record = {}
+                for dl in dsoup.find_all("dl"):
+                    for dt in dl.find_all("dt"):
+                        dd = _dd_for_dt(dt)
+                        if not dd:
+                            continue
+                        label = _norm_label(dt.get_text(" ", strip=True))
+                        value = " ".join(dd.get_text(" ", strip=True).split()) or None
+                        key = LABEL_MAP.get(label)
+                        if key:
+                            record[key] = value
+
+                # Ensure keys exist
+                for k in [
+                    "university", "program_name", "degree_type", "citizenship_raw",
+                    "status_raw", "decision_date_raw", "gpa_raw", "gre_total_raw",
+                    "gre_v_raw", "gre_aw_raw", "comments", "term_raw", "added_on_raw"
+                ]:
+                    record.setdefault(k, None)
+
+                if record.get("added_on_raw") is None:
+                    record["added_on_raw"] = added_on_from_list
+
+                record["detail_url"] = detail_url
+                record["page"] = page
+
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                written += 1
+                time.sleep(0.3)
+
+            page += 1
+
+    print(f"Wrote {written} record(s) → {RAW_STREAM}")
 
 if __name__ == "__main__":
-    scrape_data(max_entries=100)  # scrape up to 100 entries for testing
+    try:
+        scrape_data(max_entries=40)
+    except KeyboardInterrupt:
+        print("\nStopped by user.")
