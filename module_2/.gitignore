@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual envs
+.venv*/
+venv/
+ENV/
+env/
+module_2/llm_hosting/.venv311/
+
+# Local model weights
+module_2/llm_hosting/models/
+*.gguf
+
+# Caches / temp
+module_2/.cache/
+*.log
+
+# Zips / large artifacts (keep them for Canvas, not in Git)
+*.zip
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
