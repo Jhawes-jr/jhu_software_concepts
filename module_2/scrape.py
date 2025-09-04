@@ -1,190 +1,150 @@
-# scrape.py
+import os
+import re
+import json
+import time
+import urllib.parse as up
 
 import urllib3
 from bs4 import BeautifulSoup
-import os
-import json
-import time
-import re
-import urllib.parse as up
 
+# List page to start from
 LIST_URL = "https://www.thegradcafe.com/survey/index.php"
-CACHE_DIR = ".cache"
-RAW_STREAM = os.path.join(CACHE_DIR, "raw_entries.jsonl")
 
-# Optional: set True to dump debug HTML files for the first record
-DEBUG = False
+# Output
+OUT_PATH = "applicant_data.json"
 
-# Pull the "Added on Month DD, YYYY" from the list card text
-ADDED_ON_RE = re.compile(r"\bAdded on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})", re.I)
-
-# Map labels seen on detail pages to normalized keys
-LABEL_MAP = {
-    # institution/program
-    "institution": "university",
-    "institution name": "university",
-    "school": "university",
-    "program": "program_name",
-    "program name": "program_name",
-
-    # degree / term
-    "degree type": "degree_type",
-    "term": "term_raw",
-    "term of admission": "term_raw",
-
-    # decision / dates
-    "decision": "status_raw",
-    "notification": "decision_date_raw",
-    "notification date": "decision_date_raw",
-    "decision date": "decision_date_raw",
-
-    # applicant type / origin
-    "degree's country of origin": "citizenship_raw",
-    "degree’s country of origin": "citizenship_raw",
-    "applicant type": "citizenship_raw",
-    "citizenship": "citizenship_raw",
-
-    # academics
-    "undergrad gpa": "gpa_raw",
-    "undergraduate gpa": "gpa_raw",
-
-    # gre variants
-    "gre": "gre_total_raw",
-    "gre general": "gre_total_raw",
-    "gre total": "gre_total_raw",
-    "gre verbal": "gre_v_raw",
-    "gre v": "gre_v_raw",
-    "verbal": "gre_v_raw",
-    "analytical writing": "gre_aw_raw",
-    "gre aw": "gre_aw_raw",
-    "aw": "gre_aw_raw",
-
-    # notes / comments
-    "notes": "comments",
-
-    # sometimes present on detail
-    "added on": "added_on_raw",
-}
-
+# Basic headers so the site knows we're a normal client
 HEADERS = {
-    "User-Agent": "GradScraper/0.1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-def _norm_label(txt: str) -> str:
-    t = (txt or "")
-    t = t.replace("’", "'")  # normalize curly apostrophes
-    t = " ".join(t.split()).strip().lower()
-    return t[:-1].strip() if t.endswith(":") else t
+# Simple helpers --------------------------------------------------------------
 
-def _dd_for_dt(dt):
-    # On these pages, <dt> and <dd> are siblings inside the same <dl>
-    return dt.find_next_sibling("dd")
-
-def scrape_data(max_entries: int = 20):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-
-    http = urllib3.PoolManager(
+def _http() -> urllib3.PoolManager:
+    return urllib3.PoolManager(
         headers=HEADERS,
-        timeout=urllib3.Timeout(connect=5.0, read=10.0),
-        retries=urllib3.Retry(total=2, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]),
+        timeout=urllib3.Timeout(connect=8.0, read=12.0),
+        retries=urllib3.Retry(total=2, backoff_factor=0.3,
+                              status_forcelist=[429, 500, 502, 503, 504]),
     )
 
-    written = 0
+def _norm_label(txt: str) -> str:
+    """lowercase, strip, remove trailing colon"""
+    t = " ".join((txt or "").split()).strip().lower()
+    return t[:-1] if t.endswith(":") else t
+
+def _text(el) -> str | None:
+    if not el:
+        return None
+    s = " ".join(el.get_text(" ", strip=True).split()).strip()
+    return s or None
+
+# Main scraper ---------------------------------------------------------------
+
+def scrape_data(max_pages: int = 1, sleep_s: float = 0.35) -> None:
+    """
+    Fetch list pages, follow 'See More' links, read <dt>/<dd> pairs on detail pages,
+    and write a single JSON array to applicant_data.json.
+    """
+    http = _http()
+    rows: list[dict] = []
+
     page = 1
+    while page <= max_pages:
+        list_url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
+        r = http.request("GET", list_url)
+        if r.status != 200:
+            break
 
-    with open(RAW_STREAM, "w", encoding="utf-8") as out:
-        while written < max_entries:
-            url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
-            r = http.request("GET", url)
-            if r.status != 200:
-                break
+        soup = BeautifulSoup(r.data.decode("utf-8", errors="replace"), "html.parser")
+        links = soup.find_all("a", string=lambda s: s and "See More" in s)
+        if not links:
+            break
 
-            soup = BeautifulSoup(r.data.decode("utf-8", errors="replace"), "html.parser")
-            if page == 1:
-                print("Page title:", soup.title.get_text(strip=True) if soup.title else "(no title)")
-            links = soup.find_all("a", string=lambda s: s and "See More" in s)
-            if not links:
-                break
+        for a in links:
+            detail_url = up.urljoin(LIST_URL, a.get("href"))
 
-            for idx, a in enumerate(links):
-                if written >= max_entries:
-                    break
+            rd = http.request("GET", detail_url)
+            if rd.status != 200:
+                continue
 
-                detail_url = up.urljoin(LIST_URL, a.get("href"))
+            dsoup = BeautifulSoup(rd.data.decode("utf-8", errors="replace"), "html.parser")
 
-                # Added-on from list card (fallback)
-                card = a.find_parent(["article", "li", "div", "section"]) or a.parent
-                card_text = card.get_text(" ", strip=True) if card else ""
-                m = ADDED_ON_RE.search(card_text)
-                added_on_from_list = m.group(1) if m else None
-
-                # Fetch detail page
-                rd = http.request("GET", detail_url)
-                if rd.status != 200:
-                    time.sleep(0.2)
+            # Collect all <dt>/<dd> into a dict of normalized label -> value
+            data = {}
+            for dt in dsoup.find_all("dt"):
+                dd = dt.find_next_sibling("dd")
+                if not dd:
                     continue
+                label = _norm_label(_text(dt) or "")
+                value = _text(dd)
+                if label and value is not None:
+                    data[label] = value
 
-                html = rd.data.decode("utf-8", errors="replace")
-                dsoup = BeautifulSoup(html, "html.parser")
+            # Map labels found on the site to the exact output keys
+            institution = data.get("institution")
+            program_only = data.get("program")
 
-                # Optional debug dumps for the first record only
-                if DEBUG and written == 0:
-                    with open(os.path.join(CACHE_DIR, "debug_detail_page.html"), "w", encoding="utf-8") as f:
-                        f.write(dsoup.prettify())
-                    if card:
-                        with open(os.path.join(CACHE_DIR, "debug_card.html"), "w", encoding="utf-8") as f:
-                            f.write(card.prettify())
-                    dls = dsoup.find_all("dl")
-                    for j, dl_block in enumerate(dls):
-                        with open(os.path.join(CACHE_DIR, f"debug_dl_{j}.html"), "w", encoding="utf-8") as f:
-                            f.write(dl_block.prettify())
-                    with open(os.path.join(CACHE_DIR, "debug_pairs.txt"), "w", encoding="utf-8") as f:
-                        for dl_block in dsoup.find_all("dl"):
-                            for dt in dl_block.find_all("dt"):
-                                dd = _dd_for_dt(dt)
-                                f.write(
-                                    f"DT: {_norm_label(dt.get_text(' ', strip=True))} | "
-                                    f"DD: {(dd.get_text(' ', strip=True) if dd else None)}\n"
-                                )
+            # combine program + institution exactly as shown on the site
+            if program_only and institution:
+                combined_program = f"{program_only}, {institution}"
+            else:
+                combined_program = program_only or institution or ""
 
-                # Parse all <dl> blocks on the page
-                record = {}
-                for dl in dsoup.find_all("dl"):
-                    for dt in dl.find_all("dt"):
-                        dd = _dd_for_dt(dt)
-                        if not dd:
-                            continue
-                        label = _norm_label(dt.get_text(" ", strip=True))
-                        value = " ".join(dd.get_text(" ", strip=True).split()) or None
-                        key = LABEL_MAP.get(label)
-                        if key:
-                            record[key] = value
+            # Notification often contains the date text ("on 07/08/2025 via ...")
+            decision = data.get("decision")            # Accepted / Rejected / Wait listed / ...
+            notification = data.get("notification")    # e.g., "on 07/08/2025 via E-mail"
+            status = None
+            if decision and notification:
+                status = f"{decision} {notification}"
+            else:
+                status = decision or None
 
-                # Ensure keys exist
-                for k in [
-                    "university", "program_name", "degree_type", "citizenship_raw",
-                    "status_raw", "decision_date_raw", "gpa_raw", "gre_total_raw",
-                    "gre_v_raw", "gre_aw_raw", "comments", "term_raw", "added_on_raw"
-                ]:
-                    record.setdefault(k, None)
+            # term can appear as "term" on some pages; if not present, leave None
+            term = data.get("term")
 
-                if record.get("added_on_raw") is None:
-                    record["added_on_raw"] = added_on_from_list
+            # comments are under "notes"
+            comments = data.get("notes")
 
-                record["detail_url"] = detail_url
-                record["page"] = page
+            # "Added on" may appear as a label; also try to read it from the list card text
+            date_added = data.get("added on")
+            if not date_added:
+                card = a.find_parent(["article", "li", "div", "section"]) or a.parent
+                card_text = _text(card) or ""
+                m = re.search(r"\bAdded on\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})", card_text, flags=re.I)
+                date_added = m.group(1) if m else None
 
-                out.write(json.dumps(record, ensure_ascii=False) + "\n")
-                written += 1
-                time.sleep(0.3)
+            # assemble minimal record expected by the later step
+            record = {
+                "program": combined_program,                 # program + institution combined
+                "comments": comments,
+                "date_added": date_added,
+                "url": detail_url,
+                "status": status,
+                "term": term,
+                "US/International": data.get("degree's country of origin"),
+                "Degree": data.get("degree type"),
+                "GPA": data.get("undergrad gpa"),
+                "GRE": data.get("gre general"),
+                "GRE V": data.get("gre verbal"),
+                "GRE AW": data.get("analytical writing"),
+            }
+            rows.append(record)
 
-            page += 1
+            time.sleep(sleep_s)  # polite delay between detail requests
 
-    print(f"Wrote {written} record(s) → {RAW_STREAM}")
+        page += 1
+        time.sleep(0.8)          # polite delay between list pages
+
+    # write as a single JSON array file
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+    print(f"Wrote {len(rows)} records → {OUT_PATH}")
+
 
 if __name__ == "__main__":
-    try:
-        scrape_data(max_entries=40)
-    except KeyboardInterrupt:
-        print("\nStopped by user.")
+    # adjust max_pages upward later to reach 30k+ entries
+    scrape_data(max_pages=1)
