@@ -25,3 +25,6 @@ module_2/.cache/
 Thumbs.db
 .vscode/
 .idea/
+
+# Temp data files
+module_2/llm_hosting/*.jsonl
