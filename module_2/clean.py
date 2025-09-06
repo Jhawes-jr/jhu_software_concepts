@@ -42,7 +42,9 @@ def clean_data(rows):
     - extract acceptance/rejection date from `status` if present
     """
     out = []
-    for r in rows:
+
+    cleaned_files = len(rows)
+    for i, r in enumerate(rows, 1):
         rec = {}
         for k in FIELDS:
             rec[k] = _clean_text(r.get(k))
@@ -63,7 +65,11 @@ def clean_data(rows):
         rec["acceptance_date"] = acceptance_date
         rec["rejection_date"]  = rejection_date
 
+        if i % 500 == 0 or i ==1 or i == cleaned_files:
+            print(f"Total cleaned files = {i/cleaned_files:0.1%}.")
+
         out.append(rec)
+        
     return out
 
 def save_data(rows, path: str = OUT_PATH):

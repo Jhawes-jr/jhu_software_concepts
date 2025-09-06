@@ -20,14 +20,21 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-# Simple helpers --------------------------------------------------------------
 
 def _http() -> urllib3.PoolManager:
     return urllib3.PoolManager(
         headers=HEADERS,
-        timeout=urllib3.Timeout(connect=8.0, read=12.0),
-        retries=urllib3.Retry(total=2, backoff_factor=0.3,
-                              status_forcelist=[429, 500, 502, 503, 504]),
+        timeout=urllib3.Timeout(connect=5.0, read=10.0),
+        retries=urllib3.Retry(
+            total=3, 
+            connect=2, 
+            read=2, 
+            status=2, 
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504], 
+            allowed_methods=frozenset(["GET"]),
+            raise_on_status=False
+        ),
     )
 
 def _norm_label(txt: str) -> str:
@@ -43,7 +50,7 @@ def _text(el) -> str | None:
 
 # Main scraper ---------------------------------------------------------------
 
-def scrape_data(max_pages: int = 1, sleep_s: float = 0.35) -> None:
+def scrape_data(max_entries=31000, sleep_s: float = 0.35) -> None:
     """
     Fetch list pages, follow 'See More' links, read <dt>/<dd> pairs on detail pages,
     and write a single JSON array to applicant_data.json.
@@ -52,21 +59,28 @@ def scrape_data(max_pages: int = 1, sleep_s: float = 0.35) -> None:
     rows: list[dict] = []
 
     page = 1
-    while page <= max_pages:
+    written = 0
+
+    while written < max_entries:
+        print(f"\rFetching page {page}... (total records so far: {written})", end="", flush=True)
         list_url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
         r = http.request("GET", list_url)
         if r.status != 200:
+            print(f"\nHTTP {r.status} on page {page}, stopping.")
             break
 
         soup = BeautifulSoup(r.data.decode("utf-8", errors="replace"), "html.parser")
         links = soup.find_all("a", string=lambda s: s and "See More" in s)
         if not links:
+            print(f"\nNo links on page {page}, stopping.")
             break
 
         for a in links:
             detail_url = up.urljoin(LIST_URL, a.get("href"))
 
             rd = http.request("GET", detail_url)
+            
+            written += 1
             if rd.status != 200:
                 continue
 
@@ -134,9 +148,9 @@ def scrape_data(max_pages: int = 1, sleep_s: float = 0.35) -> None:
             rows.append(record)
 
             time.sleep(sleep_s)  # polite delay between detail requests
-
+        print(f"\nFinished page {page}, total {written} records so far. {written/max_entries:0.4%} done.")
         page += 1
-        time.sleep(0.8)          # polite delay between list pages
+        #time.sleep(0.8)          # polite delay between list pages
 
     # write as a single JSON array file
     with open(OUT_PATH, "w", encoding="utf-8") as f:
@@ -147,4 +161,4 @@ def scrape_data(max_pages: int = 1, sleep_s: float = 0.35) -> None:
 
 if __name__ == "__main__":
     # adjust max_pages upward later to reach 30k+ entries
-    scrape_data(max_pages=1)
+    scrape_data(max_entries=31000)
