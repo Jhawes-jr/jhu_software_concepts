@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime
 from db import get_conn
+import re
 
 
 # parse floats, return None if invalid
@@ -26,6 +27,17 @@ def parse_date(x):
         except:
             pass
     return None
+
+def parse_status(s):
+    if not s:
+        return None, None
+    m = re.match(r"^([^\d]+)\s+on\s+(\d{2}/\d{2}/\d{4})", s.strip())
+    if not m:
+        return None, None
+    status_type = m.group(1).strip()
+    status_date = parse_date(m.group(2))  # reuse your parse_date
+    return status_type, status_date
+
 
 #Get each JSON object from a file.
 def iter_records(path):
@@ -54,18 +66,18 @@ VALUES (%(program)s, %(comments)s, %(date_added)s, %(url)s, %(status)s, %(term)s
 ON CONFLICT (url) DO NOTHING;
 """
 
-# ... (everything above stays the same)
-
 def main(path, limit=None):
     n = 0
     with get_conn() as conn, conn.cursor() as cur:
         for obj in iter_records(path):
+            status_type, status_date = parse_status(obj.get("status"))
             payload = {
                 "program": obj.get("program"),
                 "comments": obj.get("comments"),
                 "date_added": parse_date(obj.get("date_added")),
                 "url": obj.get("url"),
-                "status": obj.get("status"),
+                "status_type": status_type,
+                "status_date": status_date,
                 "term": obj.get("term"),
                 "us_or_international": obj.get("US/International"),
                 "gpa": parse_float(obj.get("GPA")),
