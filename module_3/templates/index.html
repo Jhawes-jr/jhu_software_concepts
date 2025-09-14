@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Grad School Café Data Analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    {% if running %}
+      <!-- auto-refresh while scraper/loader is running -->
+      <meta http-equiv="refresh" content="7">
+    {% endif %}
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="title">Grad School Café Data Analysis</div>
+      <div class="actions">
+        <form action="{{ url_for('update_analysis') }}" method="post" class="inline">
+          <button type="submit" class="btn" {% if running %}disabled{% endif %}>
+            Update Analysis
+          </button>
+        </form>
+        <form action="{{ url_for('pull_data') }}" method="post" class="inline">
+          <button type="submit" class="btn primary" {% if running %}disabled{% endif %}>
+            Pull Data
+          </button>
+        </form>
+      </div>
+    </header>
+
+    {# Flash messages with categories so you can style success/error #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash">
+          {% for category, m in messages %}
+            <div class="flash-item {{ category }}">{{ m }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% if running %}
+        <div class="notice" role="status" aria-live="polite" aria-busy="true">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>A data pull is currently running. Buttons are disabled until it finishes.</span>
+        </div>
+    {% endif %}
+
+    <main class="container">
+      <h1>Analysis</h1>
+
+      <section class="card">
+        <div class="q">How many entries do you have in your database who have applied for Fall 2025?</div>
+        <div class="a">Answer: Applicant count: {{ q1 if q1 is not none else 'N/A' }}</div>
+      </section>
+
+      <section class="card">
+        <div class="q">What percentage of entries are from International students (not American or Other) (to two decimal places)?</div>
+        <div class="a">
+          Answer: Percent International:
+          {% if q2 is not none %}
+            {{ '%.2f' % q2 }}%
+          {% else %}
+            N/A
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="q">What is the average GPA, GRE, GRE V, GRE AW of applicants who provided these metrics?</div>
+        <div class="a">
+          {% set m = q3 if q3 is not none else {} %}
+          Answer:
+          Average GPA: {{ m.avg_gpa if m.avg_gpa is not none else 'N/A' }},
+          Average GRE Q: {{ m.avg_gre_q if m.avg_gre_q is not none else 'N/A' }},
+          Average GRE V: {{ m.avg_gre_v if m.avg_gre_v is not none else 'N/A' }},
+          Average GRE AW: {{ m.avg_gre_aw if m.avg_gre_aw is not none else 'N/A' }}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="q">What is the average GPA of American students in Fall 2025?</div>
+        <div class="a">Answer: Average GPA American: {{ q4 if q4 is not none else 'N/A' }}</div>
+      </section>
+
+      <section class="card">
+        <div class="q">What percent of entries for Fall 2025 are Acceptances (to two decimal places)?</div>
+        <div class="a">
+          Answer: Acceptance percent:
+          {% if q5 is not none %}
+            {{ '%.2f' % q5 }}%
+          {% else %}
+            N/A
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="q">What is the average GPA of applicants who applied for Fall 2025 who are Acceptances?</div>
+        <div class="a">Answer: Average GPA Acceptance: {{ q6 if q6 is not none else 'N/A' }}</div>
+      </section>
+
+      <section class="card">
+        <div class="q">How many entries are from applicants who applied to JHU for a masters degree in Computer Science?</div>
+        <div class="a">Answer: JHU Masters in CS count: {{ q7 if q7 is not none else 0 }}</div>
+      </section>
+
+      <section class="card">
+        <div class="q">How many acceptances in 2025 are for applicants who applied to Georgetown University for a PhD in Computer Science (Fall window)?</div>
+        <div class="a">Answer: Georgetown PhD CS acceptances (Fall 2025): {{ q8 if q8 is not none else 0 }}</div>
+      </section>
+
+      {# Optional: if you later add extras (median, top10 by acceptance rate), you can show them here #}
+      {% if extra1 is defined or extra2 is defined %}
+      <section class="card">
+        <div class="q">Extras</div>
+        <div class="a">
+          {% if extra1 is defined %}Median GPA (Fall 2025 Acceptances): {{ extra1 if extra1 is not none else 'N/A' }}{% endif %}
+          {% if extra2 is defined and extra2 %}
+            <div class="table-scroll">
+              <table class="wide">
+                <thead><tr><th>University</th><th>Acceptance Rate (%)</th><th>N</th></tr></thead>
+                <tbody>
+                  {% for row in extra2 %}
+                    <tr>
+                      <td>{{ row.university }}</td>
+                      <td>{{ '%.2f' % row.acceptance_rate_pct }}</td>
+                      <td>{{ row.n }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>
