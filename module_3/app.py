@@ -4,6 +4,7 @@ from query_data import compute_stats
 import subprocess, os, sys, re, time
 from datetime import datetime
 
+#---- Flask app setup ----
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -39,6 +40,7 @@ def _mtime(path):
     except OSError:
         return None
 
+# Compute gate state for Update Analysis button
 def compute_gate_state():
     """
     Allow Update Analysis only if there's a *successful* pull
@@ -49,6 +51,7 @@ def compute_gate_state():
     needs_update = (last_ok_pull is not None) and (last_analysis is None or last_analysis < last_ok_pull)
     return last_ok_pull, last_analysis, needs_update
 
+# Parse pull counts from scraper/loader output
 def _parse_pull_counts(scraper_stdout: str, loader_stdout: str) -> tuple[int|None, int|None]:
     scraped = None
     inserted = None
@@ -62,6 +65,7 @@ def _parse_pull_counts(scraper_stdout: str, loader_stdout: str) -> tuple[int|Non
             inserted = int(m.group(1))
     return scraped, inserted
 
+# Is a pull or load currently running?
 def is_running():
     """Return True if a PID in LOCK_FILE exists and is alive."""
     try:
@@ -76,6 +80,7 @@ def is_running():
         except FileNotFoundError: pass
         return False
 
+# Set or clear the lock file with given PID (or None to clear)
 def set_lock(pid: int | None):
     if pid is None:
         try: os.remove(LOCK_FILE)
@@ -99,6 +104,7 @@ def index():
         **stats
     )
 
+#Pull data: scrape + load
 @app.route("/pull-data", methods=["POST"])
 def pull_data():
     if is_running():
@@ -141,14 +147,17 @@ def pull_data():
             f.write(str(int(time.time())))
 
         scraped, inserted = _parse_pull_counts(out1, out2)
+        #If we got counts, show them; else just say "success"
         if scraped is not None or inserted is not None:
             flash(f"Pull complete: scraped {scraped or 0}, inserted {inserted or 0}.", "success")
         else:
             flash("New data pulled and loaded successfully.", "success")
 
+        #If we got any output, show last 500 chars of each
         if out1: flash(f"Scraper: {out1[-500:]}", "success")
         if out2: flash(f"Loader: {out2[-500:]}", "success")
 
+    # Handle errors
     except subprocess.CalledProcessError as e:
         msg = f"Command failed ({' '.join(e.cmd)}), exit {e.returncode}."
         if e.stderr: msg += f" STDERR: {e.stderr[-500:]}"
@@ -160,20 +169,25 @@ def pull_data():
 
     return redirect(url_for("index"))
 
+# Update analysis (if needed)
 @app.route("/update-analysis", methods=["POST"])
 def update_analysis():
+    # Only allow if not running and needs update
     if is_running():
         flash("Please wait until data pull has completed.", "error")
         return redirect(url_for("index"))
 
     last_pull_ts, _, needs_update = compute_gate_state()
+    #If no new successful pull since last analysis, do nothing
     if not needs_update:
+        # Check if we have ever had a successful pull, if not, say so
         if last_pull_ts is None:
             flash("No new data to update analysis with, please click Pull Data to refresh data.", "info")
         else:
             flash("No new data to update analysis with since the last successful pull.", "info")
         return redirect(url_for("index"))
 
+    # Try to write the analysis timestamp
     try:
         os.makedirs(os.path.dirname(ANALYSIS_FILE), exist_ok=True)
         with open(ANALYSIS_FILE, "w", encoding="utf-8") as f:

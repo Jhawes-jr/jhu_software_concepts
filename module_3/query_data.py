@@ -1,7 +1,9 @@
 # module_3/query_data.py
+
 from datetime import date
 from db import get_conn
 
+# Constants for Fall 2025 date range
 START = date(2025, 1, 1)
 END   = date(2025, 8, 31)
 
@@ -35,15 +37,17 @@ PHD_DEGREE_VARIANTS = [
     "ph.d.",
     "doctor of philosophy",
 ]
-
+# Helper: fetch one scalar value, or None
 def _one(cur):
     r = cur.fetchone()
     return None if r is None else list(r.values())[0]
 
+# Fetch one row as a dict, or None
 def _row(cur):
     r = cur.fetchone()
     return None if r is None else dict(r)
 
+# Compute all stats
 def compute_stats():
     """
     Returns: dict with q1..q8
@@ -137,7 +141,7 @@ def compute_stats():
         """, (START, END))
         q1 = _one(cur)
 
-        # Q2) % International (not "American" or "Other") among Fall 2025
+        # Q2) % International (not "American") among Fall 2025
         cur.execute(decision_cte + """
           SELECT
             ROUND(
@@ -294,6 +298,7 @@ def compute_stats():
         "q9": q9,   
         "q10": q10, 
     }
+
 
 if __name__ == "__main__":
     import json

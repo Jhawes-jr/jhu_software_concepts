@@ -33,7 +33,7 @@ def parse_date(x):
             continue
     return None
 
-
+# Parse status field into (status_type, status_date) or (None, None)
 def parse_status(s):
     if not s:
         return None, None
@@ -62,7 +62,6 @@ def iter_records(path):
                     yield json.loads(line)
 
 # Insert SQL with all fields (use ON CONFLICT to avoid dups)
-# Insert SQL with all fields (use ON CONFLICT to avoid dups)
 INSERT_SQL = """
 INSERT INTO applicants
 (program, comments, date_added, url, status, term, us_or_international,
@@ -73,6 +72,7 @@ VALUES (%(program)s, %(comments)s, %(date_added)s, %(url)s, %(status)s, %(term)s
 ON CONFLICT (url) DO NOTHING;
 """
 
+# Main function to load data from JSONL/JSON file into DB
 def main(path, limit=None):
     n = 0
     with get_conn() as conn, conn.cursor() as cur:
@@ -98,6 +98,7 @@ def main(path, limit=None):
             if limit is not None and n >= limit:
                 break
     print(f"Inserted rows: {n}")
+
 
 
 if __name__ == "__main__":
