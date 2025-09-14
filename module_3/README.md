@@ -58,7 +58,7 @@ README.md # This document
   - Avg GPA among Fall 2025 acceptances.
   - JHU Masters in CS applications.
   - Georgetown PhD CS acceptances (Fall 2025).
-  - Extras: GRE Q breakdown by domestic vs international, top 10 universities for CS acceptances.
+  - Extras: #9 Average GPA breakown by American vs international, #10 Universities with highest acceptance rate.
 
 ### Status Field
 - Distinct values discovered: `"Accepted on ..."`, `"Rejected on ..."`, `"Wait listed on ..."`.
@@ -96,10 +96,6 @@ README.md # This document
 - **Null GPA/GRE values:** initially blocked inserts.  
   ➝ Removed constraints and let queries ignore `NULL`.
 
----
-
-## Future Fixes / Improvements
-
 - **Flask Web App (Module 3 Part 3):**
   - Add “Pull Data” button → runs scraper and loader.
   - Add “Update Analysis” button → refreshes query results.
@@ -114,15 +110,10 @@ README.md # This document
   - GRE regex could be expanded for edge cases (e.g., different AW notation).
   - May want to normalize program names further (e.g., “CompSci” vs “Computer Science”).
 
-- **Performance:**
-  - For 31k+ records, inserts could be batched with `executemany`.
-  - Indexing columns (`llm_generated_university`, `llm_generated_program`) will speed up queries.
-
 ---
 
-## Usage
+- **Usage:**
+  - run app.py after dealing with dependencies/requirements
+  - naviaget to website, click pull data, wait, message will apear with stats on pull (number scraped, total number of records in db, etc)
+  - Click Update Analysis, message will appear confirming that analysis has been updated. Note: If number scraped = 0 then analysis won't change
 
-### Load Data
-```powershell
-python module_3\load_data.py module_2\llm_extend_applicant_data.jsonl
-python module_3\

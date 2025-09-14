@@ -20,13 +20,19 @@ def parse_float(x):
 def parse_date(x):
     if not x:
         return None
-    s = str(x).strip()
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%b %d, %Y", "%d-%b-%Y"):
+    for fmt in (
+        "%Y-%m-%d",   # 2025-09-14
+        "%m/%d/%Y",   # 09/14/2025
+        "%b %d, %Y",  # Sep 14, 2025
+        "%B %d, %Y",  # September 14, 2025  <-- THIS was missing
+        "%d-%b-%Y",   # 14-Sep-2025
+    ):
         try:
-            return datetime.strptime(s, fmt).date()
-        except:
-            pass
+            return datetime.strptime(x.strip(), fmt).date()
+        except Exception:
+            continue
     return None
+
 
 def parse_status(s):
     if not s:
@@ -56,6 +62,7 @@ def iter_records(path):
                     yield json.loads(line)
 
 # Insert SQL with all fields (use ON CONFLICT to avoid dups)
+# Insert SQL with all fields (use ON CONFLICT to avoid dups)
 INSERT_SQL = """
 INSERT INTO applicants
 (program, comments, date_added, url, status, term, us_or_international,
@@ -70,14 +77,12 @@ def main(path, limit=None):
     n = 0
     with get_conn() as conn, conn.cursor() as cur:
         for obj in iter_records(path):
-            status_type, status_date = parse_status(obj.get("status"))
             payload = {
                 "program": obj.get("program"),
                 "comments": obj.get("comments"),
                 "date_added": parse_date(obj.get("date_added")),
                 "url": obj.get("url"),
-                "status_type": status_type,
-                "status_date": status_date,
+                "status": obj.get("status"),  # <-- raw status string
                 "term": obj.get("term"),
                 "us_or_international": obj.get("US/International"),
                 "gpa": parse_float(obj.get("GPA")),
@@ -93,6 +98,7 @@ def main(path, limit=None):
             if limit is not None and n >= limit:
                 break
     print(f"Inserted rows: {n}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):

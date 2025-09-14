@@ -14,7 +14,7 @@
       <div class="title">Grad School Café Data Analysis</div>
       <div class="actions">
         <form action="{{ url_for('update_analysis') }}" method="post" class="inline">
-          <button type="submit" class="btn" {% if running %}disabled{% endif %}>
+          <button type="submit" class="btn" {% if running or not needs_update %}disabled{% endif %}>
             Update Analysis
           </button>
         </form>
@@ -25,6 +25,18 @@
         </form>
       </div>
     </header>
+
+    {% if last_pull_ts or last_analysis_ts %}
+      <div style="margin: 10px 24px; color: var(--muted); font-size: 0.95rem;">
+        {% if last_pull_ts %}
+          Last pull: {{ last_pull_ts | datetimeformat }}
+        {% endif %}
+        {% if last_pull_ts and last_analysis_ts %}&nbsp;|&nbsp;{% endif %}
+        {% if last_analysis_ts %}
+          Last analysis: {{ last_analysis_ts | datetimeformat }}
+        {% endif %}
+      </div>
+    {% endif %}
 
     {# Flash messages with categories so you can style success/error #}
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -53,28 +65,30 @@
       </section>
 
       <section class="card">
-        <div class="q">What percentage of entries are from International students (not American or Other) (to two decimal places)?</div>
-        <div class="a">
-          Answer: Percent International:
-          {% if q2 is not none %}
-            {{ '%.2f' % q2 }}%
-          {% else %}
-            N/A
-          {% endif %}
-        </div>
-      </section>
+  <div class="q">What is the average GPA, GRE, GRE V, GRE AW of applicants who provided these metrics?</div>
+  <div class="a">
+    {% set m = q3 if q3 else {} %}
+    Answer:
+    Average GPA: {{ m.get('avg_gpa', 'N/A') }},
+    Average GRE Q: {{ m.get('avg_gre_q', 'N/A') }},
+    Average GRE V: {{ m.get('avg_gre_v', 'N/A') }},
+    Average GRE AW: {{ m.get('avg_gre_aw', 'N/A') }}
+  </div>
+</section>
+
 
       <section class="card">
-        <div class="q">What is the average GPA, GRE, GRE V, GRE AW of applicants who provided these metrics?</div>
-        <div class="a">
-          {% set m = q3 if q3 is not none else {} %}
-          Answer:
-          Average GPA: {{ m.avg_gpa if m.avg_gpa is not none else 'N/A' }},
-          Average GRE Q: {{ m.avg_gre_q if m.avg_gre_q is not none else 'N/A' }},
-          Average GRE V: {{ m.avg_gre_v if m.avg_gre_v is not none else 'N/A' }},
-          Average GRE AW: {{ m.avg_gre_aw if m.avg_gre_aw is not none else 'N/A' }}
-        </div>
-      </section>
+  <div class="q">What is the average GPA, GRE, GRE V, GRE AW of applicants who provided these metrics?</div>
+  <div class="a">
+    {% set m = q3 if q3 else {} %}
+    Answer:
+    Average GPA: {{ m.get('avg_gpa', 'N/A') }},
+    Average GRE Q: {{ m.get('avg_gre_q', 'N/A') }},
+    Average GRE V: {{ m.get('avg_gre_v', 'N/A') }},
+    Average GRE AW: {{ m.get('avg_gre_aw', 'N/A') }}
+  </div>
+</section>
+
 
       <section class="card">
         <div class="q">What is the average GPA of American students in Fall 2025?</div>
@@ -108,31 +122,48 @@
         <div class="a">Answer: Georgetown PhD CS acceptances (Fall 2025): {{ q8 if q8 is not none else 0 }}</div>
       </section>
 
-      {# Optional: if you later add extras (median, top10 by acceptance rate), you can show them here #}
-      {% if extra1 is defined or extra2 is defined %}
       <section class="card">
-        <div class="q">Extras</div>
-        <div class="a">
-          {% if extra1 is defined %}Median GPA (Fall 2025 Acceptances): {{ extra1 if extra1 is not none else 'N/A' }}{% endif %}
-          {% if extra2 is defined and extra2 %}
-            <div class="table-scroll">
-              <table class="wide">
-                <thead><tr><th>University</th><th>Acceptance Rate (%)</th><th>N</th></tr></thead>
-                <tbody>
-                  {% for row in extra2 %}
-                    <tr>
-                      <td>{{ row.university }}</td>
-                      <td>{{ '%.2f' % row.acceptance_rate_pct }}</td>
-                      <td>{{ row.n }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          {% endif %}
-        </div>
-      </section>
-      {% endif %}
+  <div class="q">What is the GPA difference between American and International applicants (Fall 2025)?</div>
+  <div class="a">
+    {% if q9 %}
+      {% set a = q9.get('avg_american') %}
+      {% set i = q9.get('avg_international') %}
+      {% set d = q9.get('diff') %}
+      Average GPA (American): {{ '%.3f' % a if a is not none else 'N/A' }}<br>
+      Average GPA (International): {{ '%.3f' % i if i is not none else 'N/A' }}<br>
+      Difference (American − International): <strong>{{ '%.3f' % d if d is not none else 'N/A' }}</strong>
+    {% else %}
+      N/A
+    {% endif %}
+  </div>
+</section>
+
+
+<section class="card">
+  <div class="q">Which universities had the highest acceptance rate for Fall 2025 (n ≥ 20)?</div>
+  <div class="a">
+    {% if q10 %}
+      <div class="table-scroll">
+        <table class="wide">
+          <thead>
+            <tr><th>University</th><th>Acceptance Rate (%)</th><th>N</th></tr>
+          </thead>
+          <tbody>
+            {% for row in q10 %}
+              <tr>
+                <td>{{ row.university }}</td>
+                <td>{{ '%.2f' % row.acceptance_rate_pct }}</td>
+                <td>{{ row.n }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}N/A{% endif %}
+  </div>
+</section>
+
+
     </main>
   </body>
 </html>

@@ -68,6 +68,7 @@ def compute_stats():
         sp AS (
           SELECT
             p.url,
+            p.program,
             p.gpa, p.gre, p.gre_v, p.gre_aw,
             p.degree,
             p.us_or_international,
@@ -227,15 +228,71 @@ def compute_stats():
         })
         q8 = _one(cur)
 
+        # Q9) GPA difference (American vs International) for Fall 2025
+        cur.execute(decision_cte + """
+          SELECT
+            ROUND(AVG(CASE WHEN lower(us_or_international) = 'american'
+                           THEN gpa END)::numeric, 3) AS avg_american,
+            ROUND(AVG(CASE WHEN us_or_international IS NOT NULL
+                            AND lower(us_or_international) NOT IN ('american','other')
+                           THEN gpa END)::numeric, 3) AS avg_international,
+            ROUND( (AVG(CASE WHEN lower(us_or_international) = 'american' THEN gpa END)
+                   - AVG(CASE WHEN us_or_international IS NOT NULL
+                               AND lower(us_or_international) NOT IN ('american','other')
+                              THEN gpa END)
+                  )::numeric, 3) AS diff
+          FROM sp
+          WHERE decision_date_parsed >= %s AND decision_date_parsed <= %s;
+        """, (START, END))
+        q9 = _row(cur)  # dict: {avg_american, avg_international, diff}
+
+
+        # Q10) Acceptance rate by university (Fall 2025), require at least 20 posts
+        cur.execute(decision_cte + """
+          SELECT
+            uni AS university,
+            COUNT(*)::int AS n,
+            ROUND(
+              100.0 * SUM(CASE WHEN status_type_parsed = 'Accepted on' THEN 1 ELSE 0 END)
+              / NULLIF(COUNT(*), 0), 2
+            ) AS acceptance_rate_pct
+          FROM (
+            SELECT
+              trim(BOTH ' ' FROM COALESCE(
+                NULLIF(lower(llm_generated_university), ''),
+                NULLIF(split_part(program, ',', 2), '')
+              )) AS uni,
+              status_type_parsed,
+              decision_date_parsed
+            FROM sp
+          ) base
+          WHERE uni IS NOT NULL
+            AND uni <> ''
+            AND decision_date_parsed >= %s
+            AND decision_date_parsed <= %s
+          GROUP BY uni
+          HAVING COUNT(*) >= 20
+          ORDER BY acceptance_rate_pct DESC, n DESC
+          LIMIT 10;
+        """, (START, END))
+        q10 = cur.fetchall()
+
+
+
+
+
+    # Return all results as a dict
     return {
         "q1": q1,
         "q2": q2,
-        "q3": q3,   # dict with avg_gpa, avg_gre_q, avg_gre_v, avg_gre_aw
+        "q3": q3,   
         "q4": q4,
         "q5": q5,
         "q6": q6,
         "q7": q7,
         "q8": q8,
+        "q9": q9,   
+        "q10": q10, 
     }
 
 if __name__ == "__main__":
