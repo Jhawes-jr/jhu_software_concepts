@@ -12,6 +12,15 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import app as flask_app_module
+import create_schema
+import db
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_database_schema():
+    """Ensure the Postgres schema exists before any tests run."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(create_schema.DDL)
 
 
 @pytest.fixture(scope="module")
