@@ -21,8 +21,9 @@ LIST_URL = "https://www.thegradcafe.com/survey/index.php"
 
 # Paths are relative to this file's directory
 HERE = Path(__file__).resolve().parent
-STATE_FILE = HERE / "last_run.txt"                      # flat file storing YYYY-MM-DD
-JSONL_PATH_DEFAULT = HERE / "llm_extend_applicant_data.jsonl"  # incremental output
+STATE_FILE = Path(r"D:\Users\Joe Hawes Jr\Desktop\School\JHU AI (Prerequisites)\Modern Software Concepts\jhu_software_concepts\module_2\last_run.txt")
+JSONL_PATH_DEFAULT = Path(r"D:\Users\Joe Hawes Jr\Desktop\School\JHU AI (Prerequisites)\Modern Software Concepts\jhu_software_concepts\module_2\llm_extend_applicant_data.jsonl")
+
 
 # Basic headers so the site knows we're a normal client
 HEADERS = {
@@ -61,14 +62,58 @@ def _text(el) -> str | None:
     s = " ".join(el.get_text(" ", strip=True).split()).strip()
     return s or None
 
+MIN_OK = date(2000, 1, 1)
+MAX_OK = date(2030, 12, 31)
+
+def _in_range(d: date | None) -> bool:
+    return d is not None and MIN_OK <= d <= MAX_OK
+
 def parse_added_on(s: str | None) -> date | None:
-    """Parse 'Month D, YYYY' to date (e.g., 'September 7, 2025')."""
+    """Parse many common 'Added on' formats; return a date or None."""
     if not s:
         return None
-    try:
-        return datetime.strptime(s.strip(), "%B %d, %Y").date()
-    except Exception:
-        return None
+    s = s.strip()
+    for fmt in (
+        "%B %d, %Y",  # September 14, 2025
+        "%b %d, %Y",  # Sep 14, 2025
+        "%Y-%m-%d",   # 2025-09-14
+        "%m/%d/%Y",   # 09/14/2025
+        "%d-%b-%Y",   # 14-Sep-2025
+    ):
+        try:
+            d = datetime.strptime(s, fmt).date()
+            return d if _in_range(d) else None
+        except Exception:
+            continue
+    return None
+
+def find_added_on_detail(dsoup) -> str | None:
+    """Find the 'Added on' value on the detail page (return raw string)."""
+    # Preferred: in the <dt>/<dd> pairs
+    for dt in dsoup.find_all("dt"):
+        label = (dt.get_text(" ", strip=True) or "").strip().lower().rstrip(":")
+        if label == "added on":
+            dd = dt.find_next_sibling("dd")
+            if dd:
+                val = dd.get_text(" ", strip=True)
+                if val:
+                    return val
+
+    # Fallback: any 'Added on <date>' text anywhere
+    text = dsoup.get_text(" ", strip=True)
+    m = re.search(r"\bAdded on\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})\b", text, flags=re.I)
+    if m:
+        return m.group(1)
+
+    # Accept ISO / slashes if they appear after "Added on"
+    m = re.search(r"\bAdded on\s+(\d{4}-\d{2}-\d{2})\b", text, flags=re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"\bAdded on\s+(\d{1,2}/\d{1,2}/\d{4})\b", text, flags=re.I)
+    if m:
+        return m.group(1)
+
+    return None
 
 # ---------------------------------------------------------------------------
 # GRE extraction
@@ -138,7 +183,6 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
     appended = 0
     min_date, max_date = None, None
     page = 1
-    seen_old = False  # flip to True once we hit a page with only old items
 
     # open the jsonl for append once
     jsonl_out.parent.mkdir(parents=True, exist_ok=True)
@@ -159,17 +203,14 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
                 print(f"\nNo 'See More' links on page {page}, stopping.")
                 break
 
-            # track whether this page had any new items at all
             page_had_new = False
 
             for a in links:
-                # Try to read 'Added on ...' from the card BEFORE fetching details
+                # Try to read 'Added on ...' from the card BEFORE fetching details (for early skip)
                 card = a.find_parent(["article", "li", "div", "section"]) or a.parent
                 card_text = _text(card) or ""
                 m = re.search(r"\bAdded on\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})", card_text, flags=re.I)
                 card_added = parse_added_on(m.group(1)) if m else None
-
-                # Early skip if we know it's older than cutoff
                 if card_added and card_added < since:
                     continue
 
@@ -179,6 +220,18 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
                     continue
 
                 dsoup = BeautifulSoup(rd.data.decode("utf-8", errors="replace"), "html.parser")
+
+                # ---- Authoritative "Added on" ----
+                raw_added = find_added_on_detail(dsoup)           # string or None
+                date_added = parse_added_on(raw_added)            # date or None
+                if not date_added and card_added:
+                    date_added = card_added
+
+                # Require a valid date, and enforce cutoff
+                if not date_added or date_added < since:
+                    continue
+
+                date_added_iso = date_added.strftime("%Y-%m-%d")
 
                 # Collect all <dt>/<dd> into a dict of normalized label -> value
                 data = {}
@@ -207,18 +260,6 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
                 term = data.get("term")
                 comments = data.get("notes")
 
-                # Prefer explicit "Added on" from the detail page
-                date_added_str = data.get("added on")
-                date_added = parse_added_on(date_added_str) if date_added_str else None
-                # Fall back to card-level "Added on" we captured on the list page
-                if not date_added and card_added:
-                    date_added = card_added
-                    date_added_str = card_added.strftime("%B %d, %Y")
-
-                # Cutoff check with final date
-                if date_added and date_added < since:
-                    continue
-
                 # ---- GRE extraction ----
                 gre_q = _to_float(data.get("gre general"))
                 gre_v = _to_float(data.get("gre verbal"))
@@ -236,7 +277,7 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
                 record = {
                     "program": combined_program,                 # program + institution combined
                     "comments": comments,
-                    "date_added": date_added_str,                # string; loader parses to DATE
+                    "date_added": date_added_iso,                # ISO string; loader parses to DATE cleanly
                     "url": detail_url,
                     "status": status,
                     "term": term,
@@ -254,7 +295,7 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
                 page_had_new = True
 
                 # track min/max dates of scraped items
-                if date_added:
+                if (MIN_OK <= date_added <= MAX_OK):
                     if (min_date is None) or (date_added < min_date):
                         min_date = date_added
                     if (max_date is None) or (date_added > max_date):
@@ -262,12 +303,8 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
 
                 time.sleep(sleep_s)  # polite delay between detail requests
 
-            # If the page had no new items and many cards showed older-than-since,
-            # we can opportunistically stop (pagination is chronological)
             if not page_had_new:
-                seen_old = True
-
-            if seen_old and not page_had_new:
+                # no new items on this page — likely reached older-than-since region
                 print(f"\nNo new items encountered on page {page}. Stopping.")
                 break
 
@@ -286,7 +323,7 @@ def scrape_data(*, sleep_s: float, since: date, jsonl_out: Path) -> None:
     # Update last_run.txt to the max scraped date (best effort)
     if max_date:
         STATE_FILE.write_text(max_date.strftime("%Y-%m-%d"), encoding="ascii")
-        print(f"Updated {STATE_FILE.name} → {max_date.strftime('%Y-%m-%d')}")
+        print(f"Updated {STATE_FILE.name} -> {max_date.strftime('%Y-%m-%d')}")
     else:
         # If nothing appended, keep last_run.txt as-is (or create with today's date if missing)
         if not STATE_FILE.exists():
@@ -322,5 +359,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cutoff = resolve_since(args.since)
-    print(f"Cutoff (Added on ≥): {cutoff.isoformat()}")
+    print(f"Cutoff (Added on >=): {cutoff.isoformat()}")
     scrape_data(sleep_s=args.sleep, since=cutoff, jsonl_out=Path(args.jsonl_out))
