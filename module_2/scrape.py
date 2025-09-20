@@ -130,11 +130,13 @@ def _to_float(s: str | None):
 def extract_gre(raw_text: str):
     """
     Try to extract (Q, V, AW) from free text. Returns (q, v, aw) floats or None.
-    Handles common forms:
-      - 'Q 170 V 165 AW 4.5'
-      - 'GRE (Q/V/W): 170/165/4.5' or '(V/Q/W): 165/170/5.0'
-      - '170Q/165V/4.5W'
-      - 'V: 165, Q: 170, AW: 4.5'
+
+    Handles common forms::
+
+    * 'Q 170 V 165 AW 4.5'
+    * 'GRE (Q/V/W): 170/165/4.5' or '(V/Q/W): 165/170/5.0'
+    * '170Q/165V/4.5W'
+    * 'V: 165, Q: 170, AW: 4.5'
     """
     if not raw_text:
         return (None, None, None)
