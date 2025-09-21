@@ -1,3 +1,6 @@
+# module_3/create_schema.py
+''' Create the applicants table schema in the database '''
+
 from db import get_conn
 
 DDL = """ -- 1) Main applicants table

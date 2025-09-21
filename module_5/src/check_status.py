@@ -1,10 +1,14 @@
 # module_3/check_status.py
+''' Check distinct prefixes in the status column and GPA/GRE ranges '''
 
-from db import get_conn
 import re
 from collections import Counter
+from db import get_conn
+
+
 
 def main():
+    ''' Check distinct prefixes in the status column and GPA/GRE ranges '''
     with get_conn() as conn, conn.cursor() as cur:
         # existing logic: pull distinct statuses
         cur.execute("SELECT DISTINCT status FROM applicants WHERE status IS NOT NULL;")

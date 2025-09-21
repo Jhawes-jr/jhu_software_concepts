@@ -1,0 +1,16 @@
+﻿[MASTER]
+recursive = yes
+# Only skip obvious junk; DO NOT use ignore-paths / ignore-patterns for now
+ignore = .venv, venv, .git, .pytest_cache, build, dist
+
+[MESSAGES CONTROL]
+# Trim the loudest noise; add/remove later as you like
+disable =  ; missing-*docstring
+
+[REPORTS]
+reports = no
+output-format = colorized
+score = yes
+
+[FORMAT]
+max-line-length = 100

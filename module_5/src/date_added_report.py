@@ -1,8 +1,11 @@
-from db import get_conn
+''' Report on date_added field in applicants table '''
+
 from pathlib import Path
 import csv
+from db import get_conn
 
 def main():
+    ''' Report on date_added field in applicants table '''
     with get_conn() as conn, conn.cursor() as cur:
         # Totals
         cur.execute("""

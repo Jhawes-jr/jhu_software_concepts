@@ -1,4 +1,5 @@
 # module_3/query_data.py
+''' Compute various statistics from the applicants table '''
 
 from datetime import date
 from db import get_conn

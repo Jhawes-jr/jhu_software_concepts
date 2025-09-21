@@ -1,7 +1,10 @@
 # module_3/count_rows.py
+''' Count total rows in the applicants table '''
+
 from db import get_conn
 
 def main():
+    ''' Count total rows in the applicants table '''
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS total FROM applicants;")
         row = cur.fetchone()
