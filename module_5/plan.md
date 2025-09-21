@@ -1,0 +1,4 @@
+- Modify src/app.py so that /pull-data and /update-analysis return JSON responses with appropriate status codes (supporting both original redirect behavior for browser submits and JSON for tests). ?
+- Ensure busy-state and no-update paths yield 409 responses with structured payloads matching test expectations. ?
+- Update tests/test_buttons.py if needed to align with the new API behavior. ?
+- Re-run python -m pytest module_4/tests/test_buttons.py to confirm tests pass. ?

@@ -1,0 +1,122 @@
+:root {
+  --bg: #f6f6f8;
+  --card: #ffffff;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --brand: #2563eb;
+  --brand-ink: #ffffff;
+  --accent: #111827;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; }
+
+.topbar {
+  position: sticky; top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px; background: #fff; border-bottom: 1px solid var(--border);
+}
+
+.title { font-weight: 600; color: var(--accent); }
+
+.actions .inline { display: inline-block; margin-left: 10px; }
+
+.btn {
+  padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: #fff; color: var(--ink); cursor: pointer; font-weight: 600;
+}
+.btn:hover { background: #f3f4f6; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.btn.primary:hover { filter: brightness(0.95); }
+
+.flash { padding: 12px 24px; }
+.flash-item { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+
+.notice { margin: 16px 24px; padding: 10px 12px; background: #fff7ed; color: #92400e; border: 1px solid #fde68a; border-radius: 10px; }
+
+.container { max-width: 1040px; margin: 24px auto; padding: 0 24px; }
+
+h1 { font-size: 28px; margin: 6px 0 18px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 14px 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.q { font-weight: 700; margin-bottom: 10px; }
+.a { color: var(--muted); }
+
+/* --- header shadow so sticky bar pops --- */
+.topbar { box-shadow: 0 1px 0 var(--border); }
+
+/* --- better keyboard focus --- */
+.btn:focus-visible,
+.inline button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* --- flash categories --- */
+.flash-item.success { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.flash-item.error   { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.flash-item.info    { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+
+/* --- data tables (for extras / future) --- */
+.table-scroll { overflow-x: auto; }
+table.wide { width: 100%; border-collapse: collapse; background: var(--card); }
+table.wide th, table.wide td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+table.wide thead th { background: #f9fafb; font-weight: 600; }
+
+/* --- better disabled look --- */
+.btn[disabled],
+.btn:disabled { opacity: 0.55; cursor: not-allowed; filter: grayscale(8%); }
+
+/* --- numbers look nicer aligned --- */
+.a { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* --- small screens: keep buttons readable --- */
+@media (max-width: 640px) {
+  .actions .inline { display: block; margin: 8px 0 0 0; }
+  .btn { width: 100%; }
+}
+
+/* --- spinner --- */
+.spinner {
+  --sz: 18px;
+  width: var(--sz);
+  height: var(--sz);
+  border-radius: 50%;
+  border: 3px solid #e5e7eb;          /* light track */
+  border-top-color: var(--brand);      /* brand-colored arc */
+  animation: spin 0.9s linear infinite;
+  display: inline-block;
+  vertical-align: -3px;                /* align with text nicely */
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: #9ca3af; }
+}
+
+/* nicer notice layout with spinner */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
