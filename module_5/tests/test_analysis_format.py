@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest  # pylint: disable=import-error
-import app  # pylint: disable=import-error
+import pytest
+
+from tests._app_import import import_app_module
+
+app = import_app_module("app")
 
 
 def _fake_stats() -> dict[str, object]:

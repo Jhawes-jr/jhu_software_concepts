@@ -80,8 +80,8 @@ def ensure_database_schema():
             cur.execute(create_schema.DDL)
 
 
-@pytest.fixture(scope="module")
-def test_app() -> Flask:
+@pytest.fixture(scope="module", name="test_app")
+def fixture_test_app() -> Flask:
     """Flask application configured for testing."""
 
     flask_app_module = _load_module("app")
@@ -97,8 +97,8 @@ def test_app() -> Flask:
             app.config["TESTING"] = original_testing
 
 
-@pytest.fixture()
-def client(test_app: Flask):  # pylint: disable=redefined-outer-name
+@pytest.fixture(name="client")
+def client_fixture(test_app: Flask):
     """Provide a test client for issuing requests."""
 
     return test_app.test_client()
