@@ -1,10 +1,11 @@
+"""Lint-friendly tests covering analysis page formatting behavior."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
-import app
+import pytest  # pylint: disable=import-error
+import app  # pylint: disable=import-error
 
 
 def _fake_stats() -> dict[str, object]:
@@ -34,13 +35,16 @@ def _fake_stats() -> dict[str, object]:
 
 @pytest.fixture()
 def patched_stats(monkeypatch):
+    """Provide deterministic stats so tests can assert exact formatting."""
     data = _fake_stats()
     monkeypatch.setattr(app, "compute_stats", lambda: data)
     return data
 
 
 @pytest.mark.analysis
-def test_analysis_page_includes_answer_labels(client, patched_stats):
+@pytest.mark.usefixtures("patched_stats")
+def test_analysis_page_includes_answer_labels(client):
+    """The analysis page should render multiple labeled answer sections."""
     response = client.get("/analysis")
     assert response.status_code == 200
 
@@ -49,7 +53,9 @@ def test_analysis_page_includes_answer_labels(client, patched_stats):
 
 
 @pytest.mark.analysis
-def test_percentages_render_with_two_decimal_places(client, patched_stats):
+@pytest.mark.usefixtures("patched_stats")
+def test_percentages_render_with_two_decimal_places(client):
+    """All percentage values must render with two decimal places."""
     response = client.get("/analysis")
     html = response.get_data(as_text=True)
 

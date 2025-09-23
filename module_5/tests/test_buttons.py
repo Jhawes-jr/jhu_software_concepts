@@ -1,12 +1,14 @@
+"""Pylint-friendly tests validating pull/update button flows."""
+
 from __future__ import annotations
 
-import io
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-import app
+# pylint: disable=missing-function-docstring, missing-class-docstring, too-few-public-methods, no-member
+
+import app  # pylint: disable=import-error
 
 JSON_HEADERS = {"Accept": "application/json"}
 
@@ -16,7 +18,14 @@ class FakeProcess:
 
     _pid_counter = 1000
 
-    def __init__(self, cmd: list[str], *, outputs: dict[tuple[str, ...], tuple[str, str]], calls: list[list[str]], **_: Any) -> None:
+    def __init__(
+        self,
+        cmd: list[str],
+        *,
+        outputs: dict[tuple[str, ...], tuple[str, str]],
+        calls: list[list[str]],
+        **_: Any,
+    ) -> None:
         self._cmd = tuple(cmd)
         self.returncode = 0
         self._outputs = outputs
@@ -24,6 +33,12 @@ class FakeProcess:
         self._calls.append(cmd)
         FakeProcess._pid_counter += 1
         self.pid = FakeProcess._pid_counter
+
+    def __enter__(self) -> "FakeProcess":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
 
     def communicate(self) -> tuple[str, str]:
         return self._outputs[self._cmd]
@@ -47,7 +62,7 @@ def test_pull_data_triggers_scrape_and_load(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
 
     pull_ok_file = tmp_path / "last_pull_success.txt"
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(pull_ok_file))
+    monkeypatch.setattr(app, "PULL_OK_FILE", pull_ok_file)
 
     response = client.post("/pull-data", headers=JSON_HEADERS)
 
@@ -66,7 +81,7 @@ def test_update_analysis_returns_200_when_allowed(client, monkeypatch, tmp_path)
     monkeypatch.setattr(app, "compute_gate_state", lambda: (1234, 1200, True))
 
     analysis_file = tmp_path / "analysis.txt"
-    monkeypatch.setattr(app, "ANALYSIS_FILE", str(analysis_file))
+    monkeypatch.setattr(app, "ANALYSIS_FILE", analysis_file)
 
     response = client.post("/update-analysis", headers=JSON_HEADERS)
 

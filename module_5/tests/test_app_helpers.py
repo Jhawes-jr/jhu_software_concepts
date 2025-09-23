@@ -1,14 +1,19 @@
+"""Pylint-friendly coverage of helper behaviors exposed by the Flask app."""
+
 from __future__ import annotations
 
-import os
 import runpy
 import sys
 from pathlib import Path
 from typing import Any
+import types
 
 import pytest
+from flask.app import Flask
 
-import app
+# pylint: disable=missing-function-docstring, missing-class-docstring, protected-access, too-few-public-methods, no-member
+
+import app  # pylint: disable=import-error
 
 JSON_HEADERS = {"Accept": "application/json"}
 
@@ -19,7 +24,8 @@ def test_datetimeformat_returns_empty_on_error():
 
 
 @pytest.mark.buttons
-def test_wants_json_response_branches(client):
+@pytest.mark.usefixtures("client")
+def test_wants_json_response_branches():
     with app.app.test_request_context("/", json={"ping": "pong"}):
         assert app.wants_json_response() is True
 
@@ -33,7 +39,7 @@ def test_wants_json_response_branches(client):
 @pytest.mark.buttons
 def test_set_lock_creates_and_clears_file(monkeypatch, tmp_path):
     lock_path = tmp_path / "locks" / "scrape.lock"
-    monkeypatch.setattr(app, "LOCK_FILE", str(lock_path))
+    monkeypatch.setattr(app, "LOCK_FILE", lock_path)
 
     app.set_lock(999)
     assert lock_path.exists()
@@ -47,10 +53,14 @@ def test_set_lock_creates_and_clears_file(monkeypatch, tmp_path):
 @pytest.mark.buttons
 def test_is_running_true_when_pid_alive(monkeypatch, tmp_path):
     lock_path = tmp_path / "lock.txt"
-    monkeypatch.setattr(app, "LOCK_FILE", str(lock_path))
+    monkeypatch.setattr(app, "LOCK_FILE", lock_path)
 
     called = {}
-    monkeypatch.setattr(app.os, "kill", lambda pid, sig: called.setdefault("pid", pid))
+
+    def record_pid(pid: int, _sig: int) -> None:
+        called["pid"] = pid
+
+    monkeypatch.setattr(app.os, "kill", record_pid)
 
     app.set_lock(123)
     assert app.is_running() is True
@@ -60,24 +70,29 @@ def test_is_running_true_when_pid_alive(monkeypatch, tmp_path):
 @pytest.mark.buttons
 def test_is_running_handles_missing_or_bad_lock(monkeypatch, tmp_path):
     lock_path = tmp_path / "missing.lock"
-    monkeypatch.setattr(app, "LOCK_FILE", str(lock_path))
+    monkeypatch.setattr(app, "LOCK_FILE", lock_path)
     assert app.is_running() is False
 
     lock_path.write_text("not-a-pid", encoding="utf-8")
-    removed: list[str] = []
-    monkeypatch.setattr(app.os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
-    monkeypatch.setattr(app.os, "remove", lambda path: removed.append(path))
+
+    def raise_process_lookup(_pid: int, _sig: int) -> None:
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(app.os, "kill", raise_process_lookup)
     assert app.is_running() is False
-    assert str(lock_path) in removed
+    assert not lock_path.exists()
 
 
 @pytest.mark.buttons
 def test_is_running_handles_missing_lock_removal(monkeypatch, tmp_path):
     lock_path = tmp_path / "stale.lock"
-    monkeypatch.setattr(app, "LOCK_FILE", str(lock_path))
+    monkeypatch.setattr(app, "LOCK_FILE", lock_path)
     lock_path.write_text("invalid", encoding="utf-8")
-    monkeypatch.setattr(app.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError()))
-    monkeypatch.setattr(app.os, "remove", lambda path: (_ for _ in ()).throw(FileNotFoundError()))
+
+    def raise_os_error(_pid: int, _sig: int) -> None:
+        raise OSError()
+
+    monkeypatch.setattr(app.os, "kill", raise_os_error)
     assert app.is_running() is False
 
 
@@ -97,6 +112,12 @@ class ErrorProcess:
         self.returncode = 1
         self.pid = 4321
 
+    def __enter__(self) -> "ErrorProcess":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
     def communicate(self) -> tuple[str, str]:
         return "", "failure"
 
@@ -104,11 +125,14 @@ class ErrorProcess:
 @pytest.mark.buttons
 def test_pull_data_reports_subprocess_failure(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(tmp_path / "ok.txt"))
+    monkeypatch.setattr(app, "PULL_OK_FILE", tmp_path / "ok.txt")
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
-    monkeypatch.setattr(app.subprocess, "Popen", lambda cmd, **kwargs: ErrorProcess(cmd))
+    def popen_factory(cmd: list[str], **_kwargs: Any) -> ErrorProcess:
+        return ErrorProcess(cmd)
+
+    monkeypatch.setattr(app.subprocess, "Popen", popen_factory)
 
     response = client.post("/pull-data", headers=JSON_HEADERS)
     data = response.get_json()
@@ -120,11 +144,11 @@ def test_pull_data_reports_subprocess_failure(client, monkeypatch, tmp_path):
 @pytest.mark.buttons
 def test_pull_data_handles_unexpected_exception(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(tmp_path / "ok.txt"))
+    monkeypatch.setattr(app, "PULL_OK_FILE", tmp_path / "ok.txt")
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
 
     def boom(*_args, **_kwargs):
-        raise RuntimeError("spawn failed")
+        raise OSError("spawn failed")
 
     monkeypatch.setattr(app.subprocess, "Popen", boom)
 
@@ -141,6 +165,12 @@ class SuccessProcess:
         self.returncode = 0
         self.pid = 1111
 
+    def __enter__(self) -> "SuccessProcess":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
     def communicate(self) -> tuple[str, str]:
         return self._spec.get("stdout", ""), self._spec.get("stderr", "")
 
@@ -148,7 +178,7 @@ class SuccessProcess:
 @pytest.mark.buttons
 def test_pull_data_generates_flash_messages(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(tmp_path / "ok.txt"))
+    monkeypatch.setattr(app, "PULL_OK_FILE", tmp_path / "ok.txt")
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
@@ -157,7 +187,7 @@ def test_pull_data_generates_flash_messages(client, monkeypatch, tmp_path):
         tuple(app.LOADER_CMD): {"stdout": "Inserted rows: 3", "stderr": ""},
     }
 
-    def factory(cmd: list[str], **kwargs: Any) -> SuccessProcess:
+    def factory(cmd: list[str], **_kwargs: Any) -> SuccessProcess:
         return SuccessProcess(cmd, responses[tuple(cmd)])
 
     monkeypatch.setattr(app.subprocess, "Popen", factory)
@@ -184,13 +214,13 @@ def test_pull_data_reports_busy_html(client, monkeypatch):
 @pytest.mark.buttons
 def test_loader_failure_html(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(tmp_path / "ok.txt"))
+    monkeypatch.setattr(app, "PULL_OK_FILE", tmp_path / "ok.txt")
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
     call_count = {"n": 0}
 
-    def factory(cmd: list[str], **kwargs: Any):
+    def factory(cmd: list[str], **_kwargs: Any):
         if call_count["n"] == 0:
             call_count["n"] += 1
             return SuccessProcess(cmd, {"stdout": "appended 1 records", "stderr": ""})
@@ -209,7 +239,7 @@ def test_loader_failure_html(client, monkeypatch, tmp_path):
 @pytest.mark.buttons
 def test_pull_data_no_counts_html(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
-    monkeypatch.setattr(app, "PULL_OK_FILE", str(tmp_path / "ok.txt"))
+    monkeypatch.setattr(app, "PULL_OK_FILE", tmp_path / "ok.txt")
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
@@ -218,7 +248,7 @@ def test_pull_data_no_counts_html(client, monkeypatch, tmp_path):
         tuple(app.LOADER_CMD): {"stdout": "", "stderr": ""},
     }
 
-    def factory(cmd: list[str], **kwargs: Any) -> SuccessProcess:
+    def factory(cmd: list[str], **_kwargs: Any) -> SuccessProcess:
         return SuccessProcess(cmd, responses[tuple(cmd)])
 
     monkeypatch.setattr(app.subprocess, "Popen", factory)
@@ -237,7 +267,7 @@ def test_pull_data_handles_unexpected_exception_html(client, monkeypatch):
     monkeypatch.setattr(app, "set_lock", lambda pid: None)
 
     def boom(*_args, **_kwargs):
-        raise RuntimeError("html fail")
+        raise OSError("html fail")
 
     monkeypatch.setattr(app.subprocess, "Popen", boom)
 
@@ -253,13 +283,17 @@ def test_pull_data_handles_unexpected_exception_html(client, monkeypatch):
 def test_update_analysis_returns_error_when_write_fails(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
     monkeypatch.setattr(app, "compute_gate_state", lambda: (123, 100, True))
-    monkeypatch.setattr(app, "ANALYSIS_FILE", str(tmp_path / "analysis.txt"))
+    monkeypatch.setattr(app, "ANALYSIS_FILE", tmp_path / "analysis.txt")
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
-    def failing_open(*_args, **_kwargs):
-        raise OSError("disk full")
+    original_write_text = Path.write_text
 
-    monkeypatch.setattr("builtins.open", failing_open)
+    def fail_write_text(self, *args, **kwargs):
+        if self == app.ANALYSIS_FILE:
+            raise OSError("disk full")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_write_text)
 
     response = client.post("/update-analysis", headers=JSON_HEADERS)
     data = response.get_json()
@@ -271,13 +305,17 @@ def test_update_analysis_returns_error_when_write_fails(client, monkeypatch, tmp
 def test_update_analysis_write_failure_html(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
     monkeypatch.setattr(app, "compute_gate_state", lambda: (123, 100, True))
-    monkeypatch.setattr(app, "ANALYSIS_FILE", str(tmp_path / "analysis.txt"))
+    monkeypatch.setattr(app, "ANALYSIS_FILE", tmp_path / "analysis.txt")
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
-    def failing_open(*_args, **_kwargs):
-        raise OSError("disk full")
+    original_write_text = Path.write_text
 
-    monkeypatch.setattr("builtins.open", failing_open)
+    def fail_write_text(self, *args, **kwargs):
+        if self == app.ANALYSIS_FILE:
+            raise OSError("disk full")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_write_text)
 
     flashes: list[tuple[str, str]] = []
     monkeypatch.setattr(app, "flash", lambda message, category: flashes.append((message, category)))
@@ -320,7 +358,7 @@ def test_update_analysis_busy_html(client, monkeypatch):
 def test_update_analysis_success_html(client, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "is_running", lambda: False)
     monkeypatch.setattr(app, "compute_gate_state", lambda: (123, 100, True))
-    monkeypatch.setattr(app, "ANALYSIS_FILE", str(tmp_path / "analysis.txt"))
+    monkeypatch.setattr(app, "ANALYSIS_FILE", tmp_path / "analysis.txt")
     monkeypatch.setattr(app.os, "makedirs", lambda *a, **k: None)
 
     flashes: list[tuple[str, str]] = []
@@ -334,9 +372,6 @@ def test_update_analysis_success_html(client, monkeypatch, tmp_path):
 
 @pytest.mark.buttons
 def test_app_module_can_run_as_script(monkeypatch):
-    import types
-    from flask.app import Flask
-
     fake_db = types.SimpleNamespace(get_conn=lambda: None)
     monkeypatch.setitem(sys.modules, "db", fake_db)
 
