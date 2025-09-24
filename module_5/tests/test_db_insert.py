@@ -2,101 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import pytest
 
 from tests._app_import import import_app_module
+from tests.fakes import FakeDBConnection, FakeProcess, QueryConnection
+from tests.sample_data import APPLICANT_RECORDS, STAT_RESPONSES
 
 app = import_app_module("app")
 load_data = import_app_module("load_data")
 query_data = import_app_module("query_data")
 
 JSON_HEADERS = {"Accept": "application/json"}
-
-
-@dataclass
-class FakeDBConnection:
-    '''A fake database connection that records inserted rows.'''
-    rows: list[dict[str, Any]] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        self.seen_urls: set[str] = set()
-
-    def __enter__(self) -> "FakeDBConnection":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def cursor(self) -> "FakeCursor":
-        '''Return a new fake cursor.'''
-        return FakeCursor(self)
-
-
-class FakeCursor:
-    '''A fake database cursor that simulates inserts.'''
-    def __init__(self, conn: FakeDBConnection) -> None:
-        self.conn = conn
-
-    def __enter__(self) -> "FakeCursor":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
-        '''Simulate executing an SQL command.'''
-        if params is None:
-            params = {}
-        if "INSERT INTO applicants" in sql:
-            url = params.get("url")
-            if url and url not in self.conn.seen_urls:
-                self.conn.seen_urls.add(url)
-                self.conn.rows.append(params.copy())
-
-    def fetchone(self) -> None:
-        '''Simulate fetching one row (not used in loader).'''
-        return None
-
-    def fetchall(self) -> list[Any]:
-        '''Simulate fetching all rows (not used in loader).'''
-        return []
-
-
-class FakeProcess:
-    '''A fake subprocess.Popen that simulates command execution.'''
-
-    _pid_counter = 2000
-
-    def __init__(self, cmd: list[str], spec: dict[str, Any], calls: list[list[str]]) -> None:
-        self._cmd = tuple(cmd)
-        self._spec = spec
-        self._calls = calls
-        self._calls.append(cmd)
-        FakeProcess._pid_counter += 1
-        self.pid = FakeProcess._pid_counter
-        self.returncode = spec.get("returncode", 0)
-
-    def __enter__(self) -> "FakeProcess":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def communicate(self) -> tuple[str, str]:
-        '''Simulate process communication, returning stdout and stderr.'''
-        stdout = self._spec.get("stdout", "")
-        stderr = self._spec.get("stderr", "")
-        callback: Callable[[], tuple[str, str] | str | None] | None = self._spec.get("callback")
-        if callback:
-            result = callback()
-            if isinstance(result, tuple):
-                stdout, stderr = result
-            elif isinstance(result, str):
-                stdout = result
-        return stdout, stderr
 
 
 @pytest.fixture(name="fake_db")
@@ -111,24 +29,13 @@ def fixture_fake_db(monkeypatch) -> FakeDBConnection:
 def fixture_patched_loader(monkeypatch, fake_db):
     '''Patch the loader to use a fake database and simulate input data.'''
     del fake_db  # fixture invoked for side effects
-    sample_records = [
-        {
-            "program": "MS in Computer Science",
-            "comments": "Great profile",
-            "date_added": "2025-01-10",
-            "url": "https://example.com/applicant-1",
-            "status": "Accepted on 01/15/2025",
-            "term": "Fall 2025",
-            "US/International": "American",
-            "GPA": "3.80",
-            "GRE": "166",
-            "GRE V": "158",
-            "GRE AW": "5.0",
-            "Degree": "MS",
-            "llm-generated-program": "Computer Science",
-            "llm-generated-university": "Johns Hopkins University",
-        }
-    ]
+    sample_record = APPLICANT_RECORDS[0].copy()
+    sample_record.update({
+        "comments": "Great profile",
+        "date_added": "2025-01-10",
+        "status": "Accepted on 01/15/2025",
+    })
+    sample_records = [sample_record]
 
     monkeypatch.setattr(load_data, "iter_records", lambda path: list(sample_records))
 
@@ -203,75 +110,10 @@ def test_pull_data_is_idempotent(fake_db, client, monkeypatch, tmp_path):
     assert len(fake_db.rows) == 1, "Duplicate pull should not create duplicate rows"
 
 
-class QueryCursor:
-    '''A fake database cursor that returns predefined query results.'''
-    def __init__(self, responses: Sequence[Any]):
-        self._responses = list(responses)
-        self._index = 0
-
-    def __enter__(self) -> "QueryCursor":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def execute(self, sql: str, params: Any | None = None) -> None:
-        '''Simulate executing an SQL command (no-op).'''
-        del sql, params
-
-    def _next(self) -> Any:
-        if self._index >= len(self._responses):
-            raise AssertionError("No more fake query responses defined")
-        value = self._responses[self._index]
-        self._index += 1
-        return value
-
-    def fetchone(self) -> Any:
-        '''Return the next predefined response.'''
-        return self._next()
-
-    def fetchall(self) -> list[Any]:
-        '''Return the next predefined response as a list.'''
-        result = self._next()
-        return list(result)
-
-
-class QueryConnection:
-    '''A fake database connection that returns a fake cursor with predefined responses.'''
-    def __init__(self, responses: Sequence[Any]):
-        self._responses = responses
-
-    def __enter__(self) -> "QueryConnection":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def cursor(self) -> QueryCursor:
-        """Provide a query cursor configured with canned responses."""
-        return QueryCursor(self._responses)
-
-
 @pytest.mark.db
 def test_compute_stats_returns_expected_keys(monkeypatch):
     '''Test that compute_stats returns expected keys and values.'''
-    responses = [
-        {"c": 2},
-        {"pct_international": 33.33},
-        {"avg_gpa": 3.5, "avg_gre_q": 160, "avg_gre_v": 155, "avg_gre_aw": 4.5},
-        {"avg_gpa_american_2025": 3.4},
-        {"pct_accept_2025": 72.15},
-        {"avg_gpa_accepted_2025": 3.8},
-        {"c": 5},
-        {"c": 3},
-        {"avg_american": 3.4, "avg_international": 3.2, "diff": 0.2},
-        [
-            {"university": "Uni A", "n": 25, "acceptance_rate_pct": 55.12},
-            {"university": "Uni B", "n": 21, "acceptance_rate_pct": 50.00},
-        ],
-    ]
-
-    fake_conn = QueryConnection(responses)
+    fake_conn = QueryConnection(STAT_RESPONSES)
     monkeypatch.setattr(query_data, "get_conn", lambda: fake_conn)
 
     result = query_data.compute_stats()

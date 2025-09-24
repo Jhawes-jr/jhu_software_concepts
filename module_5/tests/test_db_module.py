@@ -1,16 +1,21 @@
+'''Test db module for database connection handling.'''
+
 from __future__ import annotations
 
 import runpy
-import sys
 from pathlib import Path
 
 import pytest
 
-import db
+from tests._app_import import import_app_module
+from tests.sample_data import configure_pg_env
+
+db = import_app_module("db")
 
 
 @pytest.mark.db
 def test_get_conn_uses_database_url(monkeypatch):
+    '''If DATABASE_URL is set, get_conn should use it.'''
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@host/db")
 
     recorded = {}
@@ -30,12 +35,8 @@ def test_get_conn_uses_database_url(monkeypatch):
 
 @pytest.mark.db
 def test_get_conn_builds_keyword_arguments(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setenv("PGHOST", "db-host")
-    monkeypatch.setenv("PGPORT", "6543")
-    monkeypatch.setenv("PGDATABASE", "dbname")
-    monkeypatch.setenv("PGUSER", "dbuser")
-    monkeypatch.setenv("PGPASSWORD", "secret")
+    '''If DATABASE_URL is not set, get_conn should build connection parameters'''
+    configure_pg_env(monkeypatch)
 
     recorded = {}
 
@@ -57,24 +58,29 @@ def test_get_conn_builds_keyword_arguments(monkeypatch):
 
 @pytest.mark.db
 def test_db_module_script_entry(monkeypatch, capsys):
-    import types
+    '''Running db.py as a script should attempt a DB connection and print result.'''
 
     class DummyCursor:
+        '''A dummy cursor that can be used as a context manager.'''
         def __enter__(self) -> "DummyCursor":
             return self
         def __exit__(self, exc_type, exc, tb) -> None:
-            pass
+            return None
         def execute(self, sql: str) -> None:
-            pass
+            '''Execute a SQL statement.'''
+            del sql
         def fetchone(self):
+            '''Fetch one row from the result set.'''
             return {"version": "PostgreSQL"}
 
     class DummyConn:
+        '''A dummy connection that can be used as a context manager.'''
         def __enter__(self) -> "DummyConn":
             return self
         def __exit__(self, exc_type, exc, tb) -> None:
-            pass
+            return None
         def cursor(self) -> DummyCursor:
+            '''Return a dummy cursor.'''
             return DummyCursor()
 
     recorded = []
@@ -90,4 +96,3 @@ def test_db_module_script_entry(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "DB connection OK" in out
     assert recorded
-

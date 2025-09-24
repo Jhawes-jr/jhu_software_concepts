@@ -1,3 +1,5 @@
+'''Tests for the Flask web application page.'''
+
 from __future__ import annotations
 
 import pytest

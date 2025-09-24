@@ -1,3 +1,5 @@
+'''Unit and integration tests for report scripts and db module.'''
+
 from __future__ import annotations
 
 import csv
@@ -5,67 +7,35 @@ import json
 import runpy
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Iterator
-
+from typing import Callable
+import types
 import pytest
 
-import check_status
-import count_rows
-import date_added_report
-import db
-import query_data
+from tests._app_import import import_app_module
+from tests.fakes import QueryConnection, ScriptConnection
+from tests.sample_data import STAT_RESPONSES, configure_pg_env
+check_status = import_app_module("check_status")
+count_rows = import_app_module("count_rows")
+date_added_report = import_app_module("date_added_report")
+db = import_app_module("db")
+query_data = import_app_module("query_data")
 
 
-class ScriptCursor:
-    def __init__(self, responses: Iterator[Any]) -> None:
-        self._responses = responses
-        self._current: Any | None = None
+def _capture_lines(buffer: list[str]) -> Callable[..., None]:
+    """Return a function that records print output into ``buffer``."""
 
-    def __enter__(self) -> "ScriptCursor":
-        return self
+    def record(*args, **_kwargs) -> None:
+        buffer.append(" ".join(str(arg) for arg in args))
 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def execute(self, sql: str, params: Any | None = None) -> None:
-        try:
-            self._current = next(self._responses)
-        except StopIteration as exc:
-            raise AssertionError("No scripted response available for execute call") from exc
-
-    def fetchone(self) -> Any:
-        if self._current is None:
-            raise AssertionError("fetchone called without prior execute")
-        value = self._current
-        self._current = None
-        return value
-
-    def fetchall(self) -> list[Any]:
-        if self._current is None:
-            raise AssertionError("fetchall called without prior execute")
-        value = self._current
-        self._current = None
-        return list(value)
-
-
-class ScriptConnection:
-    def __init__(self, responses: Iterable[Any]) -> None:
-        self._responses = iter(responses)
-
-    def __enter__(self) -> "ScriptConnection":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def cursor(self) -> ScriptCursor:
-        return ScriptCursor(self._responses)
-
+    return record
 
 @pytest.mark.db
 def test_check_status_main(monkeypatch):
+    '''Test check_status.main with scripted DB responses.'''
     connections = [
-        ScriptConnection([[{"status": "Accepted on 01/01/2025"}, {"status": "Rejected on 02/02/2025"}]]),
+        ScriptConnection(
+            [[{"status": "Accepted on 01/01/2025"}, {"status": "Rejected on 02/02/2025"}]]
+        ),
         ScriptConnection([
             {
                 "min_gpa": 3.1,
@@ -83,7 +53,7 @@ def test_check_status_main(monkeypatch):
     monkeypatch.setattr(check_status, "get_conn", lambda: connections.pop(0))
 
     captured: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: captured.append(" ".join(str(a) for a in args)))
+    monkeypatch.setattr("builtins.print", _capture_lines(captured))
 
     check_status.main()
 
@@ -95,6 +65,7 @@ def test_check_status_main(monkeypatch):
 
 @pytest.mark.db
 def test_check_status_script_entry(monkeypatch, capsys):
+    '''Running check_status.py as a script should print results.'''
     connections = [
         ScriptConnection([[{"status": "Accepted on 01/01/2025"}]]),
         ScriptConnection([
@@ -116,7 +87,6 @@ def test_check_status_script_entry(monkeypatch, capsys):
             raise AssertionError("No more connections")
         return connections.pop(0)
 
-    import types
     fake_db = types.SimpleNamespace(get_conn=fake_get_conn)
     monkeypatch.setitem(sys.modules, "db", fake_db)
 
@@ -127,11 +97,12 @@ def test_check_status_script_entry(monkeypatch, capsys):
 
 @pytest.mark.db
 def test_count_rows_main(monkeypatch):
+    '''Test count_rows.main with scripted DB response.'''
     conn = ScriptConnection([{ "total": 12 }])
     monkeypatch.setattr(count_rows, "get_conn", lambda: conn)
 
     captured: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: captured.append(" ".join(str(a) for a in args)))
+    monkeypatch.setattr("builtins.print", _capture_lines(captured))
 
     count_rows.main()
     assert captured[-1] == "Total rows in applicants: 12"
@@ -139,7 +110,7 @@ def test_count_rows_main(monkeypatch):
 
 @pytest.mark.db
 def test_count_rows_script_entry(monkeypatch, capsys):
-    import types
+    '''Running count_rows.py as a script should print total rows.'''
     fake_db = types.SimpleNamespace(get_conn=lambda: ScriptConnection([{ "total": 7 }]))
     monkeypatch.setitem(sys.modules, "db", fake_db)
 
@@ -150,27 +121,34 @@ def test_count_rows_script_entry(monkeypatch, capsys):
 
 @pytest.mark.db
 def test_create_schema_script_entry(monkeypatch, capsys):
-    import types
+    '''Running create_schema.py as a script should create/verify schema and print result.'''
 
     executed: list[str] = []
 
     class Cursor:
+        '''A dummy cursor that records executed SQL.'''
         def __enter__(self) -> "Cursor":
             return self
         def __exit__(self, exc_type, exc, tb) -> None:
             pass
         def execute(self, sql: str) -> None:
+            '''Execute a SQL statement.'''
             executed.append(sql)
 
     class Conn:
+        '''A dummy connection that can be used as a context manager.'''
         def __enter__(self) -> "Conn":
             return self
         def __exit__(self, exc_type, exc, tb) -> None:
             pass
         def cursor(self) -> Cursor:
+            '''Return a dummy cursor.'''
             return Cursor()
 
-    fake_db = types.SimpleNamespace(get_conn=lambda: Conn())
+    def build_conn() -> Conn:
+        return Conn()
+
+    fake_db = types.SimpleNamespace(get_conn=build_conn)
     monkeypatch.setitem(sys.modules, "db", fake_db)
 
     runpy.run_path(Path("src/create_schema.py"), run_name="__main__")
@@ -181,6 +159,7 @@ def test_create_schema_script_entry(monkeypatch, capsys):
 
 @pytest.mark.db
 def test_date_added_report_main(monkeypatch, tmp_path):
+    '''Test date_added_report.main with scripted DB responses.'''
     responses = [
         {"total": 3, "with_date": 2, "null_date": 1},
         {"min_date": "2025-01-01", "max_date": "2025-02-01"},
@@ -193,11 +172,15 @@ def test_date_added_report_main(monkeypatch, tmp_path):
         ],
     ]
 
-    monkeypatch.setattr(date_added_report, "get_conn", lambda: ScriptConnection(responses))
+    monkeypatch.setattr(
+        date_added_report,
+        "get_conn",
+        lambda: ScriptConnection(responses),
+    )
     monkeypatch.setattr(date_added_report, "Path", lambda _: tmp_path / "dummy.py")
 
     captured: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: captured.append(" ".join(str(a) for a in args)))
+    monkeypatch.setattr("builtins.print", _capture_lines(captured))
 
     date_added_report.main()
 
@@ -212,6 +195,7 @@ def test_date_added_report_main(monkeypatch, tmp_path):
 
 @pytest.mark.db
 def test_date_added_report_script_entry(monkeypatch, tmp_path, capsys):
+    '''Running date_added_report.py as a script should print results and write CSV.'''
     responses = [
         {"total": 0, "with_date": 0, "null_date": 0},
         {"min_date": None, "max_date": None},
@@ -219,7 +203,6 @@ def test_date_added_report_script_entry(monkeypatch, tmp_path, capsys):
         [],
     ]
 
-    import types
     fake_db = types.SimpleNamespace(get_conn=lambda: ScriptConnection(responses))
     monkeypatch.setitem(sys.modules, "db", fake_db)
     monkeypatch.setattr(date_added_report, "Path", lambda _: tmp_path / "dummy.py")
@@ -231,6 +214,7 @@ def test_date_added_report_script_entry(monkeypatch, tmp_path, capsys):
 
 @pytest.mark.db
 def test_db_get_conn_uses_database_url(monkeypatch):
+    '''If DATABASE_URL is set, get_conn should use it.'''
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@host/dbname")
     called = {}
 
@@ -248,12 +232,8 @@ def test_db_get_conn_uses_database_url(monkeypatch):
 
 @pytest.mark.db
 def test_db_get_conn_builds_arguments(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setenv("PGHOST", "db-host")
-    monkeypatch.setenv("PGPORT", "6543")
-    monkeypatch.setenv("PGDATABASE", "dbname")
-    monkeypatch.setenv("PGUSER", "dbuser")
-    monkeypatch.setenv("PGPASSWORD", "secret")
+    '''If DATABASE_URL is not set, get_conn should build connection parameters'''
+    configure_pg_env(monkeypatch)
 
     called = {}
 
@@ -268,73 +248,10 @@ def test_db_get_conn_builds_arguments(monkeypatch):
     assert called["host"] == "db-host"
     assert str(called["port"]) == "6543"
     assert called["row_factory"] == db.dict_row
-
-
-class QueryCursor:
-    def __init__(self, responses: list[Any]) -> None:
-        self._responses = iter(responses)
-        self._current: Any | None = None
-
-    def __enter__(self) -> "QueryCursor":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def execute(self, sql: str, params: Any | None = None) -> None:
-        try:
-            self._current = next(self._responses)
-        except StopIteration as exc:
-            raise AssertionError("No more responses for execute") from exc
-
-    def _next(self) -> Any:
-        if self._current is None:
-            raise AssertionError("fetch called without execute")
-        value = self._current
-        self._current = None
-        return value
-
-    def fetchone(self) -> Any:
-        return self._next()
-
-    def fetchall(self) -> list[Any]:
-        result = self._next()
-        return list(result)
-
-
-class QueryConnection:
-    def __init__(self, responses: list[Any]) -> None:
-        self._responses = responses
-
-    def __enter__(self) -> "QueryConnection":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def cursor(self) -> QueryCursor:
-        return QueryCursor(self._responses)
-
-
 @pytest.mark.integration
 def test_query_data_main_prints_json(monkeypatch, capsys):
-    responses = [
-        {"c": 2},
-        {"pct_international": 33.33},
-        {"avg_gpa": 3.5, "avg_gre_q": 160, "avg_gre_v": 155, "avg_gre_aw": 4.5},
-        {"avg_gpa_american_2025": 3.4},
-        {"pct_accept_2025": 72.15},
-        {"avg_gpa_accepted_2025": 3.8},
-        {"c": 5},
-        {"c": 3},
-        {"avg_american": 3.4, "avg_international": 3.2, "diff": 0.2},
-        [
-            {"university": "Uni A", "n": 25, "acceptance_rate_pct": 55.12},
-            {"university": "Uni B", "n": 21, "acceptance_rate_pct": 50.00},
-        ],
-    ]
-
-    monkeypatch.setattr(db, "get_conn", lambda: QueryConnection(responses))
+    '''Test query_data.main with scripted DB responses.'''
+    monkeypatch.setattr(db, "get_conn", lambda: QueryConnection(STAT_RESPONSES))
 
     runpy.run_path(Path("src/query_data.py"), run_name="__main__")
     out = capsys.readouterr().out

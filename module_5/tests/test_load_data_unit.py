@@ -1,3 +1,5 @@
+'''Test suite for load_data.py'''
+
 from __future__ import annotations
 
 import json
@@ -5,15 +7,20 @@ import runpy
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Any
-
+import types
 import pytest
 
-import load_data
+from tests._app_import import import_app_module
+from tests.fakes import RecordingConnection, RecordingCursor
+
+load_data = import_app_module("load_data")
+
+
 
 
 @pytest.mark.db
 def test_parse_float_handles_valid_and_invalid_values():
+    '''parse_float should convert valid strings to float, and return None for invalid input.'''
     assert load_data.parse_float("3.25") == pytest.approx(3.25)
     assert load_data.parse_float(None) is None
     assert load_data.parse_float("not-a-number") is None
@@ -21,6 +28,7 @@ def test_parse_float_handles_valid_and_invalid_values():
 
 @pytest.mark.db
 def test_parse_date_recognizes_supported_formats():
+    '''parse_date should recognize various date formats and return None for invalid input.'''
     assert load_data.parse_date("2025-09-14") == date(2025, 9, 14)
     assert load_data.parse_date("09/14/2025") == date(2025, 9, 14)
     assert load_data.parse_date("Sep 14, 2025") == date(2025, 9, 14)
@@ -32,6 +40,7 @@ def test_parse_date_recognizes_supported_formats():
 
 @pytest.mark.db
 def test_parse_status_extracts_type_and_date():
+    '''parse_status should extract status type and date if present.'''
     status, when = load_data.parse_status("Accepted on 01/15/2025")
     assert status == "Accepted"
     assert when == date(2025, 1, 15)
@@ -45,6 +54,7 @@ def test_parse_status_extracts_type_and_date():
 
 @pytest.mark.db
 def test_iter_records_read_json_array(tmp_path):
+    '''iter_records should read a JSON array from a file.'''
     payload = [{"id": 1}, {"id": 2}]
     path = tmp_path / "records.json"
     path.write_text("\n  " + json.dumps(payload), encoding="utf-8")
@@ -55,50 +65,16 @@ def test_iter_records_read_json_array(tmp_path):
 
 @pytest.mark.db
 def test_iter_records_read_jsonl(tmp_path):
+    '''iter_records should read JSON Lines from a file.'''
     payload = [{"id": 1}, {"id": 2}]
     path = tmp_path / "records.jsonl"
     path.write_text("\n".join(json.dumps(obj) for obj in payload), encoding="utf-8")
 
     rows = list(load_data.iter_records(path))
     assert rows == payload
-
-
-class RecordingCursor:
-    def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
-
-    def __enter__(self) -> "RecordingCursor":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def execute(self, sql: str, params: dict[str, Any]) -> None:
-        self.rows.append(params.copy())
-
-    def fetchone(self):  # pragma: no cover
-        return None
-
-    def fetchall(self):  # pragma: no cover
-        return []
-
-
-class RecordingConnection:
-    def __init__(self, cursor: RecordingCursor) -> None:
-        self.cursor_obj = cursor
-
-    def __enter__(self) -> "RecordingConnection":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        pass
-
-    def cursor(self) -> RecordingCursor:
-        return self.cursor_obj
-
-
 @pytest.mark.db
 def test_main_inserts_records_respects_limit(monkeypatch):
+    '''main should insert records into the DB and respect the limit parameter.'''
     cursor = RecordingCursor()
     conn = RecordingConnection(cursor)
     monkeypatch.setattr(load_data, "get_conn", lambda: conn)
@@ -140,7 +116,8 @@ def test_main_inserts_records_respects_limit(monkeypatch):
     monkeypatch.setattr(load_data, "iter_records", lambda path: list(sample))
 
     captured: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: captured.append(" ".join(str(a) for a in args)))
+    monkeypatch.setattr("builtins.print", lambda *args,
+    **kwargs: captured.append(" ".join(str(a) for a in args)))
 
     load_data.main("ignored", limit=1)
 
@@ -154,7 +131,7 @@ def test_main_inserts_records_respects_limit(monkeypatch):
 
 @pytest.mark.db
 def test_load_data_script_usage(monkeypatch, capsys):
-    import types
+    '''Running load_data.py without arguments should print usage and exit.'''
 
     fake_db = types.SimpleNamespace(get_conn=lambda: None)
     monkeypatch.setitem(sys.modules, "db", fake_db)
@@ -174,7 +151,7 @@ def test_load_data_script_usage(monkeypatch, capsys):
 
 @pytest.mark.db
 def test_load_data_script_invokes_main(monkeypatch, tmp_path):
-    import types
+    '''Running load_data.py with valid args should invoke main and process data.'''
 
     payload = {
         "program": "Program",
@@ -202,5 +179,7 @@ def test_load_data_script_invokes_main(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "db", fake_db)
     monkeypatch.setattr(sys, "argv", ["load_data.py", str(sample_path), "1"])
 
-    runpy.run_path(Path("src/load_data.py"), run_name="__main__")
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_path(Path("src/load_data.py"), run_name="__main__")
+    assert exc_info.value.code == 0
     assert cursor.rows and cursor.rows[0]["url"] == "https://example.com/1"
