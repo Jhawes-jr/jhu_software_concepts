@@ -159,9 +159,11 @@ class ScriptCursor:
         self._current: Any | None = None
 
     def __enter__(self) -> "ScriptCursor":
+        """Return ``self`` for context manager usage."""
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        """Support context manager protocol without special cleanup."""
         return None
 
     def execute(self, sql: str, params: Any | None = None) -> None:

@@ -1,7 +1,9 @@
 ''' Database connection utility '''
 
 import os
+
 import psycopg
+from psycopg import sql
 from psycopg.rows import dict_row
 
 def get_conn():
@@ -20,6 +22,7 @@ def get_conn():
                            user=user, password=password, row_factory=dict_row)
 if __name__ == "__main__":
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT version();")
+        version_stmt = sql.SQL("SELECT version()")
+        cur.execute(version_stmt)
         print(cur.fetchone()["version"])
     print("DB connection OK")

@@ -5,7 +5,7 @@ ignore = .venv, venv, .git, .pytest_cache, build, dist
 
 [MESSAGES CONTROL]
 # Trim the loudest noise; add/remove later as you like
-disable =  ; missing-*docstring
+disable =  
 
 [REPORTS]
 reports = no

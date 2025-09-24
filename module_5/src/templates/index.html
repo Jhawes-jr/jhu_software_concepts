@@ -65,16 +65,16 @@
       </section>
 
       <section class="card">
-  <div class="q">What is the average GPA, GRE, GRE V, GRE AW of applicants who provided these metrics?</div>
-  <div class="a">
-    {% set m = q3 if q3 else {} %}
-    Answer:
-    Average GPA: {{ m.get('avg_gpa', 'N/A') }},
-    Average GRE Q: {{ m.get('avg_gre_q', 'N/A') }},
-    Average GRE V: {{ m.get('avg_gre_v', 'N/A') }},
-    Average GRE AW: {{ m.get('avg_gre_aw', 'N/A') }}
-  </div>
-</section>
+        <div class="q">What percentage of entries are from international students (not American or Other) (to two decimal places)?</div>
+        <div class="a">
+          Answer: International percentage:
+          {% if q2 is not none %}
+            {{ '%.2f' % q2 }}%
+          {% else %}
+            N/A
+          {% endif %}
+        </div>
+      </section>
 
 
       <section class="card">
@@ -167,3 +167,5 @@
     </main>
   </body>
 </html>
+
+

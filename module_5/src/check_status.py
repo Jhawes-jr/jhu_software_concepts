@@ -3,15 +3,32 @@
 
 import re
 from collections import Counter
+
+from psycopg import sql
+
 from db import get_conn
+
+
+STATUS_LIMIT = 1000
+TABLE_APPLICANTS = sql.Identifier("applicants")
 
 
 
 def main():
     ''' Check distinct prefixes in the status column and GPA/GRE ranges '''
     with get_conn() as conn, conn.cursor() as cur:
-        # existing logic: pull distinct statuses
-        cur.execute("SELECT DISTINCT status FROM applicants WHERE status IS NOT NULL;")
+        status_stmt = sql.SQL(
+        "SELECT DISTINCT status "
+        "FROM {table} "
+        "WHERE status IS NOT NULL "
+        "ORDER BY status "
+        "LIMIT {limit}"
+    ).format(
+            table=TABLE_APPLICANTS,
+            limit=sql.Literal(STATUS_LIMIT),
+        )
+
+        cur.execute(status_stmt)
         rows = [r["status"] for r in cur.fetchall()]
 
     prefixes = []
@@ -30,14 +47,24 @@ def main():
 
     # --- NEW: GPA + GRE min/max checks ---
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""
+        ranges_stmt = sql.SQL(
+            """
             SELECT
-              MIN(gpa)     AS min_gpa,     MAX(gpa)     AS max_gpa,
-              MIN(gre)     AS min_gre_q,   MAX(gre)     AS max_gre_q,
-              MIN(gre_v)   AS min_gre_v,   MAX(gre_v)   AS max_gre_v,
-              MIN(gre_aw)  AS min_gre_aw,  MAX(gre_aw)  AS max_gre_aw
-            FROM applicants;
-        """)
+              MIN({gpa})    AS min_gpa,    MAX({gpa})    AS max_gpa,
+              MIN({gre})    AS min_gre_q,  MAX({gre})    AS max_gre_q,
+              MIN({gre_v})  AS min_gre_v,  MAX({gre_v})  AS max_gre_v,
+              MIN({gre_aw}) AS min_gre_aw, MAX({gre_aw}) AS max_gre_aw
+            FROM {table}
+            """
+        ).format(
+            gpa=sql.Identifier("gpa"),
+            gre=sql.Identifier("gre"),
+            gre_v=sql.Identifier("gre_v"),
+            gre_aw=sql.Identifier("gre_aw"),
+            table=TABLE_APPLICANTS,
+        )
+
+        cur.execute(ranges_stmt)
         row = cur.fetchone()
 
     print("\nGPA / GRE ranges:")
